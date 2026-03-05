@@ -462,6 +462,7 @@ async function pollNotifications() {
       const cached = courseCache.get(key);
       const now = Date.now();
       let course;
+      let isStale = false;
 
       if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
         // Cached result is still fresh enough for all due subscribers — skip NTUST.
@@ -499,12 +500,25 @@ async function pollNotifications() {
             `[NOTIFY] Failed to fetch ${entry.CourseNo}:`,
             err.message,
           );
-          // Fall back to stale cache rather than dropping subscribers entirely.
+          // Fall back to stale cache so we don't lose the course reference,
+          // but mark it stale so we don't make state-transition decisions on
+          // potentially outdated enrollment data.
           course = cached?.course ?? null;
+          isStale = true;
         }
       }
 
       if (!course) continue;
+
+      // If the fetch failed and we're using stale data, preserve the existing
+      // state rather than risk a missed FULL → OPEN transition caused by
+      // outdated enrollment counts.
+      if (isStale) {
+        console.log(
+          `[NOTIFY] Skipping state update for ${entry.CourseNo} — using stale data`,
+        );
+        continue;
+      }
 
       const nowFull = isFull(course);
 
