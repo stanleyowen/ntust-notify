@@ -11,6 +11,8 @@ function NotifyPrefsPanel({ prefs, onSave }) {
   const [form, setForm] = useState({ ...prefs });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // null | { discord, email }
   const [pollOptions, setPollOptions] = useState([
     { label: "30 seconds", value: 30_000 },
     { label: "1 minute",   value: 60_000 },
@@ -56,6 +58,26 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Not logged in");
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_BASE}/api/notify/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setTestResult(data.results ?? { error: data.error ?? "Unknown error" });
+    } catch (err) {
+      setTestResult({ error: err.message });
+    } finally {
+      setTesting(false);
+    }
   }
 
   const hasChannel = form.email || form.discord;
@@ -189,7 +211,33 @@ function NotifyPrefsPanel({ prefs, onSave }) {
         >
           {saving ? "Saving…" : "Save preferences"}
         </button>
+        {hasChannel && (
+          <button
+            className="btn btn-secondary"
+            onClick={handleTest}
+            disabled={testing || saving}
+            title="Send a test alert to verify your Discord / email channel"
+          >
+            {testing ? "Sending…" : "🔔 Test notification"}
+          </button>
+        )}
         {saved && <span className="notify-saved-badge">✓ Saved</span>}
+        {testResult && !testing && (
+          <span className="notify-saved-badge" style={{ background: testResult.error ? "#ef4444" : undefined }}>
+            {testResult.error
+              ? `✗ ${testResult.error}`
+              : [
+                  testResult.discord && testResult.discord !== "not configured"
+                    ? `Discord: ${testResult.discord}`
+                    : null,
+                  testResult.email && testResult.email !== "not configured"
+                    ? `Email: ${testResult.email}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Sent"}
+          </span>
+        )}
       </div>
     </div>
   );

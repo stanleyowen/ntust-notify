@@ -137,6 +137,110 @@ app.get("/health", generalLimiter, (_req, res) => {
 });
 
 /**
+ * GET /api/notify/status
+ * Authorization: Bearer <firebase-id-token>
+ * Returns the current in-memory polling state for the requesting user's watched
+ * courses: what the poller last saw (full/open), whether it already notified,
+ * and how stale the NTUST cache is.
+ */
+app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
+  const uid = req.user.uid;
+  const courses = watchedCoursesData.get(uid);
+  if (!courses || courses.size === 0) {
+    return res.json({ watching: [], pollerReady: !isFirstNotifyRun });
+  }
+
+  const now = Date.now();
+  const watching = [];
+  for (const [, w] of courses) {
+    const stateKey = `${uid}::${w.CourseNo}`;
+    const state = stateMap.get(stateKey) ?? null;
+    const cacheKey = `${w.Semester ?? ""}::${w.CourseNo}`;
+    const cached = courseCache.get(cacheKey);
+    watching.push({
+      courseNo: w.CourseNo,
+      courseName: w.CourseName ?? "",
+      notifyEnabled: w.notifyEnabled ?? false,
+      state: state
+        ? { wasFull: state.wasFull, notifiedOpen: state.notifiedOpen }
+        : null,
+      cache: cached
+        ? {
+            ageMs: now - cached.fetchedAt,
+            ageSeconds: Math.round((now - cached.fetchedAt) / 1000),
+            chooseStudent: cached.course.ChooseStudent,
+            restrict1: cached.course.Restrict1,
+          }
+        : null,
+    });
+  }
+
+  res.json({
+    pollerReady: !isFirstNotifyRun,
+    lastPolled: userLastPolled.has(uid)
+      ? new Date(userLastPolled.get(uid)).toISOString()
+      : null,
+    watching,
+  });
+});
+
+/**
+ * POST /api/notify/test
+ * Authorization: Bearer <firebase-id-token>
+ * Sends a test Discord / email notification immediately so you can verify that
+ * your webhook URL and SMTP are wired up correctly.  Does not affect poller
+ * state.
+ */
+app.post("/api/notify/test", generalLimiter, requireAuth, async (req, res) => {
+  const uid = req.user.uid;
+  const userData = usersData.get(uid);
+  if (!userData) {
+    return res
+      .status(404)
+      .json({ error: "User data not yet loaded — retry in a few seconds." });
+  }
+
+  const { email: userEmail, notifyPrefs } = userData;
+  const results = { discord: null, email: null };
+
+  const fakeCourse = {
+    CourseNo: "TEST0000",
+    CourseName: "Test Notification",
+    CourseTeacher: "NTUST Notify",
+    Restrict1: "30",
+    ChooseStudent: 29,
+    CreditPoint: 3,
+    ClassRoomNo: "TR-101",
+    Node: "M1,W3",
+    Semester: "1142",
+  };
+
+  if (notifyPrefs.discord) {
+    try {
+      await sendDiscordNotification(fakeCourse, notifyPrefs);
+      results.discord = "sent";
+    } catch (err) {
+      results.discord = `failed: ${err.message}`;
+    }
+  } else {
+    results.discord = "not configured";
+  }
+
+  if (notifyPrefs.email) {
+    try {
+      await sendEmailNotification(fakeCourse, userEmail);
+      results.email = "sent";
+    } catch (err) {
+      results.email = `failed: ${err.message}`;
+    }
+  } else {
+    results.email = "not configured";
+  }
+
+  res.json({ results });
+});
+
+/**
  * GET /api/poll-options
  * Authorization: Bearer <firebase-id-token>
  * Returns the available poll intervals and minInterval for the requesting user.
