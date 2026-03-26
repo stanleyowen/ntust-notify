@@ -10,15 +10,24 @@ const admin = require("firebase-admin");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+/**
+ * Upstream NTUST course query endpoint used for both direct course searches and
+ * background availability polling.
+ */
 const NTUST_API = "https://querycourse.ntust.edu.tw/QueryCourse/api/courses";
 
 // ─── Auth emails & poll intervals ────────────────────────────────────────────
 // AUTH_EMAILS: comma-separated list of email addresses that may poll as fast as
-// 1 s.  All other users are capped at a 10 s minimum.
+// 1 s. All other users are capped at a 30 s minimum.
 const AUTH_EMAILS = process.env.AUTH_EMAILS
   ? process.env.AUTH_EMAILS.split(",").map((e) => e.trim().toLowerCase())
   : [];
 
+/**
+ * Poll intervals exposed to regular users.
+ *
+ * @type {{label: string, value: number}[]}
+ */
 const NORMAL_POLL_OPTIONS = [
   { label: "30 seconds", value: 30_000 },
   { label: "1 minute", value: 60_000 },
@@ -26,6 +35,13 @@ const NORMAL_POLL_OPTIONS = [
   { label: "5 minutes", value: 300_000 },
   { label: "10 minutes", value: 600_000 },
 ];
+
+/**
+ * Poll intervals exposed to privileged users. These users may select the extra
+ * 1-second polling option in addition to the normal set.
+ *
+ * @type {{label: string, value: number}[]}
+ */
 const AUTH_POLL_OPTIONS = [
   { label: "1 second", value: 1_000 },
   ...NORMAL_POLL_OPTIONS,
@@ -42,9 +58,10 @@ try {
     const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     credential = admin.credential.cert(sa);
   } else {
-    // Falls back to GOOGLE_APPLICATION_CREDENTIALS or ADC
+    // Falls back to GOOGLE_APPLICATION_CREDENTIALS or ADC.
     credential = admin.credential.applicationDefault();
   }
+
   admin.initializeApp({ credential });
   db = admin.firestore();
   console.log("[FIREBASE] Admin SDK initialized.");
@@ -71,8 +88,8 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
 }
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// Allowed origins: ALLOWED_ORIGINS env var (comma-separated) merged with
-// localhost variants that are always allowed for local development.
+// Allowed origins: ALLOWED_ORIGINS env var (comma-separated) merged with the
+// default production frontends.
 const ALLOWED_ORIGINS = [
   ...(process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
@@ -81,8 +98,16 @@ const ALLOWED_ORIGINS = [
 
 app.use(
   cors({
+    /**
+     * Validates whether an incoming browser origin may access the API.
+     * Requests without an Origin header (for example curl or server-to-server
+     * traffic) are allowed.
+     *
+     * @param {string | undefined} origin - Incoming request origin.
+     * @param {(err: Error | null, allow?: boolean) => void} callback - CORS callback.
+     * @returns {void}
+     */
     origin(origin, callback) {
-      // Allow requests with no origin (curl, Postman, server-to-server)
       if (!origin) return callback(null, true);
       if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
       callback(new Error(`CORS: origin '${origin}' not allowed`));
@@ -94,14 +119,14 @@ app.use(
 );
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-// Trust the first proxy hop (nginx, Caddy, etc.) so express-rate-limit can
-// read the real client IP from X-Forwarded-For instead of the proxy's IP.
+// Trust the first proxy hop (nginx, Caddy, etc.) so express-rate-limit can read
+// the real client IP from X-Forwarded-For instead of the proxy's IP.
 app.set("trust proxy", 1);
-app.use(helmet()); // Sets X-Content-Type-Options, X-Frame-Options, HSTS, etc.
-app.use(express.json({ limit: "16kb" })); // Reject oversized bodies
+app.use(helmet());
+app.use(express.json({ limit: "16kb" }));
 
-// ─── Rate limiting ───────────────────────────────────────────────────────────────
-// Course proxy: max 30 requests per minute per IP
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+// Course proxy: max 30 requests per minute per IP.
 const courseLimiter = rateLimit({
   windowMs: 60_000,
   max: 30,
@@ -109,7 +134,8 @@ const courseLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests, please slow down." },
 });
-// Poll options / general: max 60 per minute per IP
+
+// Poll options / general: max 60 requests per minute per IP.
 const generalLimiter = rateLimit({
   windowMs: 60_000,
   max: 60,
@@ -118,11 +144,20 @@ const generalLimiter = rateLimit({
   message: { error: "Too many requests, please slow down." },
 });
 
-// ─── Auth middleware ───────────────────────────────────────────────────────────────
-// Verifies Firebase ID token for routes that require a logged-in user.
+// ─── Auth middleware ──────────────────────────────────────────────────────────
+/**
+ * Verifies the Firebase ID token attached to the Authorization header and
+ * stores the decoded user payload on req.user.
+ *
+ * @param {import("express").Request} req - Express request object.
+ * @param {import("express").Response} res - Express response object.
+ * @param {import("express").NextFunction} next - Express next callback.
+ * @returns {Promise<void>}
+ */
 async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ error: "Unauthorized" });
+
   try {
     req.user = await admin.auth().verifyIdToken(token);
     next();
@@ -132,6 +167,9 @@ async function requireAuth(req, res, next) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+/**
+ * Lightweight health endpoint used by deployments and uptime checks.
+ */
 app.get("/health", generalLimiter, (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
@@ -139,9 +177,11 @@ app.get("/health", generalLimiter, (_req, res) => {
 /**
  * GET /api/notify/status
  * Authorization: Bearer <firebase-id-token>
+ *
  * Returns the current in-memory polling state for the requesting user's watched
- * courses: what the poller last saw (full/open), whether it already notified,
- * and how stale the NTUST cache is.
+ * courses, including whether each course is currently considered full/open,
+ * whether the open-state notification has already been sent, and the current
+ * NTUST cache health.
  */
 app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
   const uid = req.user.uid;
@@ -170,14 +210,14 @@ app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
       const cached = courseCache.get(cacheKey);
       const stats = fetchStats.get(cacheKey) ?? null;
 
-      // Explain why the poller might be skipping this course
+      // Explain why the poller might be skipping this course.
       const skipReasons = [];
-      if (!hasAnyNotify)
+      if (!hasAnyNotify) {
         skipReasons.push(
           "no notification channel enabled (email/discord both off)",
         );
-      if (!w.notifyEnabled)
-        skipReasons.push("bell not enabled for this course");
+      }
+      if (!w.notifyEnabled) skipReasons.push("bell not enabled for this course");
 
       watching.push({
         courseNo: w.CourseNo,
@@ -228,9 +268,10 @@ app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
 /**
  * POST /api/notify/test
  * Authorization: Bearer <firebase-id-token>
- * Sends a test Discord / email notification immediately so you can verify that
- * your webhook URL and SMTP are wired up correctly.  Does not affect poller
- * state.
+ *
+ * Sends immediate test notifications through the configured Discord webhook and
+ * email channel so the user can verify both integrations without waiting for a
+ * real course state change.
  */
 app.post("/api/notify/test", generalLimiter, requireAuth, async (req, res) => {
   const uid = req.user.uid;
@@ -244,6 +285,9 @@ app.post("/api/notify/test", generalLimiter, requireAuth, async (req, res) => {
   const { email: userEmail, notifyPrefs } = userData;
   const results = { discord: null, email: null };
 
+  /**
+   * Synthetic course payload used purely for smoke-testing notification output.
+   */
   const fakeCourse = {
     CourseNo: "TEST0000",
     CourseName: "Test Notification",
@@ -284,17 +328,21 @@ app.post("/api/notify/test", generalLimiter, requireAuth, async (req, res) => {
 /**
  * GET /api/poll-options
  * Authorization: Bearer <firebase-id-token>
- * Returns the available poll intervals and minInterval for the requesting user.
+ *
+ * Returns the polling interval options available to the caller. Unauthenticated
+ * callers receive the regular user defaults.
  */
 app.get("/api/poll-options", generalLimiter, async (req, res) => {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token || !db) {
     return res.json({ minInterval: 30_000, options: NORMAL_POLL_OPTIONS });
   }
+
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     const email = (decoded.email ?? "").toLowerCase();
     const isAuth = AUTH_EMAILS.length > 0 && AUTH_EMAILS.includes(email);
+
     return res.json({
       minInterval: isAuth ? 1_000 : 30_000,
       options: isAuth ? AUTH_POLL_OPTIONS : NORMAL_POLL_OPTIONS,
@@ -306,8 +354,11 @@ app.get("/api/poll-options", generalLimiter, async (req, res) => {
 
 /**
  * POST /api/courses
- * Authorization: Bearer <firebase-id-token>  (required)
+ * Authorization: Bearer <firebase-id-token>
  * Body: { Semester, CourseNo, CourseName, CourseTeacher }
+ *
+ * Proxies course search requests to the official NTUST API while applying this
+ * service's timeout, validation, and rate limiting rules.
  */
 app.post("/api/courses", courseLimiter, requireAuth, async (req, res) => {
   const payload = {
@@ -349,17 +400,41 @@ app.post("/api/courses", courseLimiter, requireAuth, async (req, res) => {
 });
 
 // ─── Notification helpers ─────────────────────────────────────────────────────
+/**
+ * Determines whether a course is currently full according to its enrollment
+ * limit and chosen student count.
+ *
+ * @param {{Restrict1: string | number, ChooseStudent: number}} course - Course record.
+ * @returns {boolean}
+ */
 function isFull(course) {
   const limit = parseInt(course.Restrict1, 10);
   return !isNaN(limit) && limit > 0 && course.ChooseStudent >= limit;
 }
 
+/**
+ * Calculates the number of remaining seats for a course.
+ *
+ * @param {{Restrict1: string | number, ChooseStudent: number}} course - Course record.
+ * @returns {number | string}
+ */
 function remainingSlots(course) {
   const limit = parseInt(course.Restrict1, 10);
   return !isNaN(limit) ? Math.max(0, limit - course.ChooseStudent) : "?";
 }
 
+/**
+ * Maps NTUST schedule day codes to readable English day names.
+ *
+ * @type {Record<string, string>}
+ */
 const DAY_MAP = { M: "Mon", T: "Tue", W: "Wed", R: "Thu", F: "Fri", S: "Sat" };
+
+/**
+ * Maps NTUST period codes to approximate start times.
+ *
+ * @type {Record<string, string>}
+ */
 const PERIOD_MAP = {
   1: "08:10",
   2: "09:10",
@@ -377,8 +452,17 @@ const PERIOD_MAP = {
   n: "12:10",
   N: "13:10",
 };
+
+/**
+ * Converts NTUST node strings such as "M1,W3" into a more readable schedule
+ * string such as "Mon 08:10, Wed 10:10".
+ *
+ * @param {string} node - Raw NTUST schedule string.
+ * @returns {string}
+ */
 function formatNode(node) {
   if (!node) return "N/A";
+
   return node
     .split(",")
     .map((n) => {
@@ -391,6 +475,13 @@ function formatNode(node) {
     .join(", ");
 }
 
+/**
+ * Sends a Discord webhook notification announcing that a course has opened.
+ *
+ * @param {Record<string, any>} course - Course data payload.
+ * @param {{discordWebhook?: string, discordTagMe?: boolean, discordUserId?: string}} notify - User notification preferences.
+ * @returns {Promise<void>}
+ */
 async function sendDiscordNotification(course, notify) {
   const webhookUrl = notify.discordWebhook;
   if (!webhookUrl) return;
@@ -438,6 +529,13 @@ async function sendDiscordNotification(course, notify) {
   }
 }
 
+/**
+ * Sends an email notification announcing that a course has opened.
+ *
+ * @param {Record<string, any>} course - Course data payload.
+ * @param {string} toEmail - Recipient email address.
+ * @returns {Promise<void>}
+ */
 async function sendEmailNotification(course, toEmail) {
   if (!mailer || !toEmail) return;
 
@@ -480,31 +578,43 @@ async function sendEmailNotification(course, toEmail) {
 // ─── Notification polling ─────────────────────────────────────────────────────
 // stateMap key: `uid::courseNo`
 // value: { wasFull: boolean, notifiedOpen: boolean }
-//   wasFull      – was the course full on the last poll?
-//   notifiedOpen – have we already sent a notification for the *current* open
-//                  window?  Reset to false whenever the course becomes full
-//                  again, allowing one fresh alert the next time it opens.
+//   wasFull      – whether the course was full on the last poll.
+//   notifiedOpen – whether a notification has already been sent for the current
+//                  open window. This resets to false once the course becomes
+//                  full again, allowing one fresh alert the next time it opens.
 const stateMap = new Map();
+
 // Track when each user was last polled so per-user intervals are respected.
-const userLastPolled = new Map(); // uid → Date.now() timestamp
-// Cache the last NTUST result per course key to avoid redundant fetches.
+const userLastPolled = new Map();
+
+// Cache the last NTUST result per course key.
 // key: `semester::courseNo` → { course: object, fetchedAt: number }
 const courseCache = new Map();
-// NTUST fetch health tracking.
+
+// Track NTUST fetch health per course.
 // key: `semester::courseNo` → { lastSuccessAt, lastErrorAt, lastError, consecutiveFailures, totalFetches }
 const fetchStats = new Map();
+
 let isFirstNotifyRun = true;
-let pollRunning = false; // prevents concurrent poll executions
+let pollRunning = false;
 
 // ─── In-memory Firestore mirror ───────────────────────────────────────────────
-// onSnapshot listeners keep these maps current in real time.
-// Zero Firestore reads happen inside the poll loop — only when data changes.
-const usersData = new Map(); // uid → { email, notifyPrefs }
-const watchedCoursesData = new Map(); // uid → Map<courseNo, course doc fields>
-const watchListeners = new Map(); // uid → unsubscribe fn for subcollection
+// onSnapshot listeners keep these maps current in real time so the poll loop
+// can avoid repeated Firestore reads.
+const usersData = new Map();
+const watchedCoursesData = new Map();
+const watchListeners = new Map();
 
+/**
+ * Creates a real-time listener for a user's watchedCourses subcollection and
+ * mirrors the latest documents into memory.
+ *
+ * @param {string} uid - Firebase user ID.
+ * @returns {void}
+ */
 function setupWatchedCoursesListener(uid) {
   if (watchListeners.has(uid)) return;
+
   const unsub = db
     .collection("users")
     .doc(uid)
@@ -524,11 +634,19 @@ function setupWatchedCoursesListener(uid) {
           err.message,
         ),
     );
+
   watchListeners.set(uid, unsub);
 }
 
+/**
+ * Attaches the top-level Firestore listener for users and dynamically manages
+ * the watched-courses subcollection listeners for each active user.
+ *
+ * @returns {void}
+ */
 function setupFirestoreListeners() {
   if (!db) return;
+
   console.log("[FIRESTORE] Setting up real-time listeners…");
   db.collection("users").onSnapshot(
     (snap) => {
@@ -556,11 +674,22 @@ function setupFirestoreListeners() {
   );
 }
 
+/**
+ * Executes one notification polling cycle.
+ *
+ * The poller builds a deduplicated course list from in-memory Firestore state,
+ * fetches fresh or cached NTUST course data, detects FULL → OPEN transitions on
+ * a per-user basis, and sends Discord/email notifications exactly once per open
+ * window.
+ *
+ * @returns {Promise<void>}
+ */
 async function pollNotifications() {
   if (!db || pollRunning) return;
+
   pollRunning = true;
   try {
-    // Build courseMap from in-memory data — no Firestore reads.
+    // Build a unique course map from in-memory data — no Firestore reads.
     const courseMap = new Map();
 
     for (const [uid, userData] of usersData) {
@@ -575,8 +704,9 @@ async function pollNotifications() {
       const effectiveInterval = Math.max(requestedInterval, minInterval);
 
       const lastPolled = userLastPolled.get(uid) ?? 0;
-      if (!isFirstNotifyRun && Date.now() - lastPolled < effectiveInterval)
+      if (!isFirstNotifyRun && Date.now() - lastPolled < effectiveInterval) {
         continue;
+      }
       userLastPolled.set(uid, Date.now());
 
       const courses = watchedCoursesData.get(uid);
@@ -597,6 +727,7 @@ async function pollNotifications() {
           const entry = courseMap.get(key);
           entry.maxAgeMs = Math.min(entry.maxAgeMs, effectiveInterval);
         }
+
         courseMap
           .get(key)
           .subscribers.push({ uid, email: userEmail, notify: notifyPrefs });
@@ -605,7 +736,7 @@ async function pollNotifications() {
 
     if (courseMap.size === 0) return;
 
-    // 3. For each unique course, fetch live data from NTUST (or reuse cache).
+    // For each unique course, fetch live data from NTUST or reuse fresh cache.
     for (const [key, entry] of courseMap) {
       const cached = courseCache.get(key);
       const now = Date.now();
@@ -613,13 +744,11 @@ async function pollNotifications() {
       let isStale = false;
 
       if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
-        // Cached result is still fresh enough for all due subscribers — skip NTUST.
         course = cached.course;
         console.log(
           `[NOTIFY] Cache hit for ${entry.CourseNo} (${Math.round((now - cached.fetchedAt) / 1000)}s old, max ${Math.round(entry.maxAgeMs / 1000)}s)`,
         );
       } else {
-        // Fetch fresh data from NTUST.
         try {
           const res = await axios.post(
             NTUST_API,
@@ -640,10 +769,11 @@ async function pollNotifications() {
             },
             { headers: { "Content-Type": "application/json" }, timeout: 15000 },
           );
+
           const courses = Array.isArray(res.data) ? res.data : [];
           course = courses.find((c) => c.CourseNo === entry.CourseNo) ?? null;
           if (course) courseCache.set(key, { course, fetchedAt: now });
-          // Record success
+
           const prev = fetchStats.get(key) ?? {
             totalFetches: 0,
             consecutiveFailures: 0,
@@ -661,7 +791,7 @@ async function pollNotifications() {
             `[NOTIFY] Failed to fetch ${entry.CourseNo}:`,
             err.message,
           );
-          // Record failure
+
           const prev = fetchStats.get(key) ?? {
             totalFetches: 0,
             consecutiveFailures: 0,
@@ -674,9 +804,9 @@ async function pollNotifications() {
             consecutiveFailures: (prev.consecutiveFailures ?? 0) + 1,
             totalFetches: prev.totalFetches + 1,
           });
-          // Fall back to stale cache so we don't lose the course reference,
-          // but mark it stale so we don't make state-transition decisions on
-          // potentially outdated enrollment data.
+
+          // Fall back to stale cache so we keep the last known course record,
+          // but avoid making state-transition decisions based on outdated data.
           course = cached?.course ?? null;
           isStale = true;
         }
@@ -684,9 +814,8 @@ async function pollNotifications() {
 
       if (!course) continue;
 
-      // If the fetch failed and we're using stale data, preserve the existing
-      // state rather than risk a missed FULL → OPEN transition caused by
-      // outdated enrollment counts.
+      // If the fetch failed and we are using stale data, preserve the existing
+      // state rather than risk a missed FULL → OPEN transition.
       if (isStale) {
         console.log(
           `[NOTIFY] Skipping state update for ${entry.CourseNo} — using stale data`,
@@ -696,18 +825,17 @@ async function pollNotifications() {
 
       const nowFull = isFull(course);
 
-      // Notify each subscriber if slot just opened
+      // Notify each subscriber independently if a slot just opened.
       for (const sub of entry.subscribers) {
         const stateKey = `${sub.uid}::${entry.CourseNo}`;
         const prev = stateMap.get(stateKey);
 
         if (isFirstNotifyRun) {
-          // Seed state — no alerts on first scan
+          // Seed initial state without sending alerts.
           stateMap.set(stateKey, { wasFull: nowFull, notifiedOpen: !nowFull });
           continue;
         }
 
-        // Course went from FULL → OPEN and we haven't notified yet this window
         if (!nowFull && prev?.wasFull && !prev?.notifiedOpen) {
           console.log(
             `[NOTIFY] Slot opened for ${entry.CourseNo} — notifying uid ${sub.uid}`,
@@ -719,10 +847,9 @@ async function pollNotifications() {
 
           stateMap.set(stateKey, { wasFull: false, notifiedOpen: true });
         } else if (nowFull) {
-          // Course is full — reset so the next open window triggers a fresh alert
+          // Reset the open-window notification state once the course is full.
           stateMap.set(stateKey, { wasFull: true, notifiedOpen: false });
         } else {
-          // Course still open but already notified (or no prior full state)
           stateMap.set(stateKey, {
             wasFull: false,
             notifiedOpen: prev?.notifiedOpen ?? false,
@@ -755,18 +882,25 @@ app.listen(PORT, () => {
     console.log(
       `[NOTIFY] Polling loop started — per-user intervals enforced${authNote}`,
     );
+
     setupFirestoreListeners();
-    // Give the initial onSnapshot a moment to populate in-memory data,
-    // then start the poll loop.
-    // Use recursive setTimeout (not setInterval) so each poll only starts
-    // after the previous one fully completes, preventing concurrent executions
-    // and the cache-hit pile-up that causes missed notifications.
+
+    /**
+     * Schedules the next polling cycle only after the current cycle has fully
+     * completed. This avoids overlapping executions that could otherwise create
+     * duplicate work or inconsistent notification state.
+     *
+     * @returns {void}
+     */
     function scheduleNextPoll() {
       setTimeout(async () => {
         await pollNotifications();
         scheduleNextPoll();
       }, 1_000);
     }
+
+    // Give the initial onSnapshot listeners a moment to populate memory before
+    // the first notification sweep starts.
     setTimeout(() => {
       pollNotifications().then(scheduleNextPoll);
     }, 2_000);
