@@ -1,11 +1,35 @@
 import { useState, useEffect } from "react";
 import { auth } from "../firebase";
 
+/**
+ * Base URL for backend API requests.
+ *
+ * @type {string}
+ */
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 /**
- * Inline notification preferences panel (rendered inside the Notifications tab).
- * prefs shape: { email, discord, discordWebhook, discordTagMe, discordUserId }
+ * Inline notification preferences panel rendered inside the Notifications tab.
+ *
+ * This component allows the user to:
+ * - enable or disable email notifications,
+ * - configure Discord webhook notifications,
+ * - choose a server-side polling interval,
+ * - send a test notification,
+ * - inspect poller diagnostics returned by the backend.
+ *
+ * @param {{
+ *   prefs: {
+ *     email?: boolean,
+ *     discord?: boolean,
+ *     discordWebhook?: string,
+ *     discordTagMe?: boolean,
+ *     discordUserId?: string,
+ *     pollInterval?: number,
+ *   },
+ *   onSave: (prefs: Record<string, any>) => Promise<void>,
+ * }} props - Component props.
+ * @returns {JSX.Element}
  */
 function NotifyPrefsPanel({ prefs, onSave }) {
   const [form, setForm] = useState({ ...prefs });
@@ -18,15 +42,22 @@ function NotifyPrefsPanel({ prefs, onSave }) {
   const [statusError, setStatusError] = useState(null);
   const [pollOptions, setPollOptions] = useState([
     { label: "30 seconds", value: 30_000 },
-    { label: "1 minute",   value: 60_000 },
-    { label: "3 minutes",  value: 180_000 },
-    { label: "5 minutes",  value: 300_000 },
+    { label: "1 minute", value: 60_000 },
+    { label: "3 minutes", value: 180_000 },
+    { label: "5 minutes", value: 300_000 },
     { label: "10 minutes", value: 600_000 },
   ]);
 
-  // Fetch available poll intervals once the current user is confirmed logged in.
-  // Using onAuthStateChanged ensures we always have a valid token even if the
-  // component mounts before Firebase has restored the session.
+  /**
+   * Fetches the poll interval options allowed for the currently authenticated
+   * user.
+   *
+   * The backend may return a faster set of options for privileged users.
+   * Using onAuthStateChanged ensures the component waits until Firebase has
+   * restored the session and a valid ID token can be requested.
+   *
+   * @returns {() => void}
+   */
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (!user) return;
@@ -39,22 +70,41 @@ function NotifyPrefsPanel({ prefs, onSave }) {
         const data = await res.json();
         if (Array.isArray(data.options)) setPollOptions(data.options);
       } catch {
-        // keep defaults
+        // Keep the default options if the fetch fails.
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Keep local form in sync if prefs change from Firestore (e.g. first load)
+  /**
+   * Resets the local editable form whenever upstream preferences change.
+   *
+   * This is especially useful on first load when preferences arrive
+   * asynchronously from Firestore.
+   *
+   * @returns {void}
+   */
   useEffect(() => {
     setForm({ ...prefs });
   }, [prefs]);
 
+  /**
+   * Updates a single form field in local component state.
+   *
+   * @param {string} field - Preference field name.
+   * @param {any} value - New field value.
+   * @returns {void}
+   */
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
     setSaved(false);
   }
 
+  /**
+   * Persists the current notification settings through the parent save handler.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleSave() {
     setSaving(true);
     await onSave(form);
@@ -63,6 +113,12 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     setTimeout(() => setSaved(false), 3000);
   }
 
+  /**
+   * Sends a test notification through the backend using the user's currently
+   * saved server-side notification settings.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleTest() {
     setTesting(true);
     setTestResult(null);
@@ -83,6 +139,11 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     }
   }
 
+  /**
+   * Fetches backend poller diagnostics for the current user's watched courses.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleRefreshStatus() {
     setStatusLoading(true);
     setStatusError(null);
@@ -102,6 +163,9 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     }
   }
 
+  /**
+   * Whether at least one notification delivery channel is currently enabled.
+   */
   const hasChannel = form.email || form.discord;
 
   return (

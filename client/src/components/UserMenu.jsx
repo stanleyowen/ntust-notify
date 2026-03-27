@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
+/**
+ * Authenticated user menu shown in the app header.
+ *
+ * The menu displays the current user's avatar/details and provides a sign-out
+ * action.
+ *
+ * @returns {JSX.Element | null}
+ */
 function UserMenu() {
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);

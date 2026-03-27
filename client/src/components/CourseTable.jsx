@@ -1,10 +1,31 @@
+/**
+ * Maps NTUST weekday codes to readable day abbreviations.
+ *
+ * @type {Record<string, string>}
+ */
 const DAY_MAP = { M: "Mon", T: "Tue", W: "Wed", R: "Thu", F: "Fri", S: "Sat" };
+
+/**
+ * Maps NTUST period codes to display times.
+ *
+ * @type {Record<string, string>}
+ */
 const PERIOD_MAP = {
   1: "08:10", 2: "09:10", 3: "10:10", 4: "11:10", 5: "12:10",
   6: "13:10", 7: "14:10", 8: "15:10", 9: "16:10", 10: "17:10",
   11: "18:10", 12: "19:10", A: "07:10", n: "12:10", N: "13:10",
 };
 
+/**
+ * Converts an NTUST schedule node string into a human-readable display string.
+ *
+ * Example:
+ * - Input: "M1,W3"
+ * - Output: "Mon 08:10, Wed 10:10"
+ *
+ * @param {string} node - Raw NTUST schedule node string.
+ * @returns {string}
+ */
 function formatNode(node) {
   if (!node) return "N/A";
   return node
@@ -18,6 +39,23 @@ function formatNode(node) {
     .join(", ");
 }
 
+/**
+ * Renders a single course row inside the course table.
+ *
+ * This component derives watch state, notification state, enrollment progress,
+ * and full/open status from the course record and helper callbacks passed in by
+ * the parent table.
+ *
+ * @param {{
+ *   course: Record<string, any>,
+ *   isWatched: (courseNo: string) => boolean,
+ *   onWatch: (course: Record<string, any>) => void | Promise<void>,
+ *   onUnwatch: (courseNo: string) => void | Promise<void>,
+ *   isNotifyEnabled: (courseNo: string) => boolean,
+ *   onToggleNotify: (courseNo: string) => void | Promise<void>,
+ * }} props - Component props.
+ * @returns {JSX.Element}
+ */
 function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
   const limit = parseInt(course.Restrict1, 10);
   const enrolled = course.ChooseStudent;
@@ -83,6 +121,23 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
   );
 }
 
+/**
+ * Renders the main course results table.
+ *
+ * The table is reused both for search results and for the user's watchlist. It
+ * also handles the two empty/loading states before rendering rows.
+ *
+ * @param {{
+ *   courses: Array<Record<string, any>>,
+ *   loading: boolean,
+ *   isWatched: (courseNo: string) => boolean,
+ *   onWatch: (course: Record<string, any>) => void | Promise<void>,
+ *   onUnwatch: (courseNo: string) => void | Promise<void>,
+ *   isNotifyEnabled: (courseNo: string) => boolean,
+ *   onToggleNotify: (courseNo: string) => void | Promise<void>,
+ * }} props - Component props.
+ * @returns {JSX.Element | null}
+ */
 function CourseTable({ courses, loading, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
   if (loading && courses.length === 0) {
     return (

@@ -2,6 +2,19 @@ import { useEffect, useState, useCallback } from "react";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
+/**
+ * Default notification preference values used before Firestore data loads and
+ * as a fallback for any missing fields in the stored document.
+ *
+ * @type {{
+ *   email: boolean,
+ *   discord: boolean,
+ *   discordWebhook: string,
+ *   discordTagMe: boolean,
+ *   discordUserId: string,
+ *   pollInterval: number,
+ * }}
+ */
 export const DEFAULT_NOTIFY_PREFS = {
   email: false,
   discord: false,
@@ -12,12 +25,27 @@ export const DEFAULT_NOTIFY_PREFS = {
 };
 
 /**
- * Reads and writes the user-level notification preferences stored at
- * users/{uid}.notifyPrefs in Firestore.
+ * Subscribes to and updates the current user's notification preferences stored
+ * in Firestore at users/{uid}.notifyPrefs.
+ *
+ * The hook returns the latest merged preference object plus a save function that
+ * writes the full notifyPrefs payload back to Firestore.
+ *
+ * @param {string | undefined | null} uid - Firebase user ID.
+ * @returns {{
+ *   prefs: typeof DEFAULT_NOTIFY_PREFS,
+ *   savePrefs: (newPrefs: typeof DEFAULT_NOTIFY_PREFS) => Promise<void>,
+ * }}
  */
 export function useNotifyPrefs(uid) {
   const [prefs, setPrefs] = useState(DEFAULT_NOTIFY_PREFS);
 
+  /**
+   * Subscribes to the user's Firestore document and keeps local preference state
+   * synchronized in real time.
+   *
+   * @returns {() => void | undefined}
+   */
   useEffect(() => {
     if (!uid) {
       setPrefs(DEFAULT_NOTIFY_PREFS);
@@ -35,6 +63,12 @@ export function useNotifyPrefs(uid) {
     return unsub;
   }, [uid]);
 
+  /**
+   * Saves a new notification preference object to Firestore.
+   *
+   * @param {typeof DEFAULT_NOTIFY_PREFS} newPrefs - New preference values.
+   * @returns {Promise<void>}
+   */
   const savePrefs = useCallback(
     async (newPrefs) => {
       if (!uid) return;

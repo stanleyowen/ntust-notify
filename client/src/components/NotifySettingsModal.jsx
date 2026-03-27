@@ -1,14 +1,33 @@
 import { useState, useEffect } from "react";
 
 /**
- * User-level notification preferences modal.
- * prefs shape: { email, discord, discordWebhook, discordTagMe, discordUserId }
+ * Modal dialog for editing user-level notification preferences.
+ *
+ * This appears to be an alternate modal-based UI for notification settings,
+ * while the current app also provides an inline settings panel.
+ *
+ * @param {{
+ *   prefs: {
+ *     email?: boolean,
+ *     discord?: boolean,
+ *     discordWebhook?: string,
+ *     discordTagMe?: boolean,
+ *     discordUserId?: string,
+ *   },
+ *   onSave: (prefs: Record<string, any>) => Promise<void>,
+ *   onClose: () => void,
+ * }} props - Component props.
+ * @returns {JSX.Element}
  */
 function NotifySettingsModal({ prefs, onSave, onClose }) {
   const [form, setForm] = useState({ ...prefs });
   const [saving, setSaving] = useState(false);
 
-  // Close on Escape key
+  /**
+   * Adds Escape-key handling so the modal can be dismissed from the keyboard.
+   *
+   * @returns {() => void}
+   */
   useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") onClose();
@@ -17,10 +36,23 @@ function NotifySettingsModal({ prefs, onSave, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /**
+   * Updates a single field in the local form state.
+   *
+   * @param {string} field - Preference field name.
+   * @param {any} value - New field value.
+   * @returns {void}
+   */
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  /**
+   * Saves the current form values through the parent callback, then closes the
+   * modal.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleSave() {
     setSaving(true);
     await onSave(form);
@@ -28,6 +60,9 @@ function NotifySettingsModal({ prefs, onSave, onClose }) {
     onClose();
   }
 
+  /**
+   * Whether the user has enabled at least one notification channel.
+   */
   const hasChannel = form.email || form.discord;
 
   return (
@@ -162,4 +197,3 @@ function NotifySettingsModal({ prefs, onSave, onClose }) {
 }
 
 export default NotifySettingsModal;
-
