@@ -1,9 +1,38 @@
+/**
+ * Search form used to collect NTUST course query criteria.
+ *
+ * The form is controlled by the parent component, which owns the query object.
+ * Submitting the form starts or refreshes the client-side polling flow.
+ *
+ * @param {{
+ *   query: { Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string },
+ *   onChange: import("react").Dispatch<import("react").SetStateAction<{ Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string }>>,
+ *   onSearch: () => void,
+ *   onStop: () => void,
+ *   isPolling: boolean,
+ *   loading: boolean,
+ * }} props - Component props.
+ * @returns {JSX.Element}
+ */
 function SearchForm({ query, onChange, onSearch, onStop, isPolling, loading }) {
+  /**
+   * Handles form submission by preventing the browser reload and delegating the
+   * actual search logic to the parent component.
+   *
+   * @param {import("react").FormEvent<HTMLFormElement>} e - Form submit event.
+   * @returns {void}
+   */
   function handleSubmit(e) {
     e.preventDefault();
     onSearch();
   }
 
+  /**
+   * Updates a single field in the controlled query object.
+   *
+   * @param {import("react").ChangeEvent<HTMLInputElement>} e - Input change event.
+   * @returns {void}
+   */
   function handleChange(e) {
     onChange((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }

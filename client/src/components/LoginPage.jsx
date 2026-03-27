@@ -1,11 +1,27 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
+/**
+ * Login screen shown to unauthenticated users.
+ *
+ * This component provides a single Google sign-in button and displays any
+ * authentication error returned by Firebase.
+ *
+ * @returns {JSX.Element}
+ */
 function LoginPage() {
   const { signInWithGoogle } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  /**
+   * Starts the Google sign-in flow.
+   *
+   * If the sign-in attempt fails, the component captures the error message and
+   * shows it on screen.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleSignIn() {
     setLoading(true);
     setError(null);
