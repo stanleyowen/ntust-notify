@@ -37,20 +37,7 @@ function sanitize(course) {
 function simulateBatchUpdate() {
   if (!initialized || courses.length === 0) return;
 
-  const batchSize = Math.ceil(courses.length / 10);
-  const startIdx = updateCursor;
-  const endIdx = startIdx + batchSize;
-
-  let batch = courses.slice(startIdx, endIdx);
-  const needed = batchSize - batch.length;
-  if (needed > 0) {
-    batch = batch.concat(courses.slice(0, needed));
-    updateCursor = needed;
-  } else {
-    updateCursor = endIdx;
-  }
-
-  for (const course of batch) {
+  for (const course of courses) {
     const restrict2Str = course.Restrict2 || "0";
     const capacity = /^\d+$/.test(restrict2Str) ? parseInt(restrict2Str, 10) : 0;
     if (capacity <= 0) continue;
@@ -154,7 +141,7 @@ router.post("/courses", (req, res) => {
 async function initDemo() {
   try {
     await loadCourseData(DEMO_SEMESTER);
-    simInterval = setInterval(simulateBatchUpdate, 1000);
+    simInterval = setInterval(simulateBatchUpdate, 10_000);
     console.log("[DEMO] Simulation worker started.");
   } catch (err) {
     console.error("[DEMO] Failed to initialize:", err.message);
