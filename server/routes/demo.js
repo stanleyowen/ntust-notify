@@ -136,6 +136,19 @@ router.post("/courses", (req, res) => {
   res.json(searchCourses(req.body));
 });
 
+// Batch lookup by course numbers — used to refresh watchlist with live enrollment data.
+router.post("/courses/batch", (req, res) => {
+  if (!initialized) {
+    return res.status(503).json({ error: "Demo data is still loading." });
+  }
+  const courseNos = req.body.courseNos;
+  if (!Array.isArray(courseNos)) {
+    return res.status(400).json({ error: "courseNos array is required" });
+  }
+  const set = new Set(courseNos);
+  res.json(courses.filter((c) => set.has(c.CourseNo)));
+});
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 async function initDemo() {

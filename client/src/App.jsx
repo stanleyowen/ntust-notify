@@ -279,13 +279,59 @@ function TrackerApp({ uid }) {
     setIsPolling(false);
   }
 
+  // In demo mode, periodically refresh watched courses with live enrollment data
+  // from the fake backend so the watchlist shows current numbers.
+  const [liveWatchedData, setLiveWatchedData] = useState(new Map());
+
+  useEffect(() => {
+    if (!IS_DEMO || watchedCourses.length === 0) {
+      setLiveWatchedData(new Map());
+      return;
+    }
+
+    async function refreshWatchedData() {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const courseNos = watchedCourses.map((c) => c.CourseNo);
+        const res = await fetch(`${API_BASE}/api/demo/courses/batch`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ courseNos }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const map = new Map();
+          data.forEach((c) => map.set(c.CourseNo, c));
+          setLiveWatchedData(map);
+        }
+      } catch {
+        /* ignore refresh errors */
+      }
+    }
+
+    refreshWatchedData();
+    const id = setInterval(refreshWatchedData, 10_000);
+    return () => clearInterval(id);
+  }, [watchedCourses]);
+
+  // Merge live enrollment data into watched courses for demo mode.
+  const enrichedWatchedCourses = IS_DEMO
+    ? watchedCourses.map((w) => {
+        const live = liveWatchedData.get(w.CourseNo);
+        return live ? { ...w, ...live, notifyEnabled: w.notifyEnabled } : w;
+      })
+    : watchedCourses;
+
   /**
    * Courses currently displayed in the table.
    *
    * The Search tab shows live search results, while the Watchlist tab shows the
    * user's saved watched courses.
    */
-  const displayedCourses = activeTab === "watched" ? watchedCourses : courses;
+  const displayedCourses = activeTab === "watched" ? enrichedWatchedCourses : courses;
 
   /**
    * Whether the course table should be rendered for the current tab.
