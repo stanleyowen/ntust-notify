@@ -37,7 +37,7 @@ function sanitize(course) {
 function simulateBatchUpdate() {
   if (!initialized || courses.length === 0) return;
 
-  const batchSize = Math.ceil(courses.length / 60);
+  const batchSize = Math.ceil(courses.length / 10);
   const startIdx = updateCursor;
   const endIdx = startIdx + batchSize;
 
