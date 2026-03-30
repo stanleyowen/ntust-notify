@@ -99,14 +99,14 @@ function searchCourses(criteria) {
 
   const qSemester = criteria.Semester || "";
   const qNo = (criteria.CourseNo || "").toUpperCase();
-  const qName = (criteria.CourseName || "").trim();
+  const qName = (criteria.CourseName || "").trim().toLowerCase();
   const qTeacher = criteria.CourseTeacher || "";
   const qDim = criteria.Dimension || "";
 
   return courses.filter((c) => {
     if (qSemester && c.Semester !== qSemester) return false;
     if (qNo && !(c.CourseNo || "").toUpperCase().includes(qNo)) return false;
-    if (qName && !(c.CourseName || "").includes(qName)) return false;
+    if (qName && !(c.CourseName || "").toLowerCase().includes(qName)) return false;
     if (qTeacher && !(c.CourseTeacher || "").includes(qTeacher)) return false;
     if (qDim && c.Dimension !== qDim) return false;
     return true;
