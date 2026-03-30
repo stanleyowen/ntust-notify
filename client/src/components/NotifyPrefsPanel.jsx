@@ -160,7 +160,9 @@ function NotifyPrefsPanel({ prefs, onSave, demo = false }) {
         });
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setStatus(await res.json());
+      const data = await res.json();
+      if (demo) data.hasAnyNotify = !!(form.email || form.discord);
+      setStatus(data);
     } catch (err) {
       setStatusError(err.message);
     } finally {
