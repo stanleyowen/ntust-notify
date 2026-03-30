@@ -24,6 +24,13 @@ import "./index.css";
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 /**
+ * Whether the app is running in demo mode (accessed via /demo path).
+ * In demo mode, course searches hit the fake backend while everything else
+ * (auth, watchlist, notifications) works normally.
+ */
+const IS_DEMO = window.location.pathname.startsWith("/demo");
+
+/**
  * Client-side auto-refresh interval used while the search page is actively
  * polling.
  *
@@ -58,7 +65,7 @@ function TrackerApp({ uid }) {
     isWatched,
     toggleNotify,
     isNotifyEnabled,
-  } = useWatchedCourses(uid);
+  } = useWatchedCourses(uid, { demo: IS_DEMO });
   const { prefs, savePrefs } = useNotifyPrefs(uid);
 
   /**
@@ -190,7 +197,8 @@ function TrackerApp({ uid }) {
 
       try {
         const token = await auth.currentUser?.getIdToken();
-        const res = await fetch(`${API_BASE}/api/courses`, {
+        const coursesUrl = IS_DEMO ? `${API_BASE}/api/demo/courses` : `${API_BASE}/api/courses`;
+        const res = await fetch(coursesUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -292,7 +300,10 @@ function TrackerApp({ uid }) {
             <h1>NTUST Course Tracker</h1>
             <p className="subtitle">Monitor course availability in real time</p>
           </div>
-          <UserMenu />
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            {IS_DEMO && <span className="demo-badge">Demo Mode</span>}
+            <UserMenu />
+          </div>
         </div>
 
         <div className="tabs">

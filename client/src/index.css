@@ -472,6 +472,19 @@ td.code {
 }
 
 /* ── User menu ── */
+/* ── Demo badge ── */
+.demo-badge {
+  display: inline-block;
+  background: #f59e0b;
+  color: #0f172a;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .user-menu {
   position: relative;
 }

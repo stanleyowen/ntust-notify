@@ -230,6 +230,10 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// ─── Demo routes ──────────────────────────────────────────────────────────
+const { router: demoRouter, initDemo, searchCourses: demoSearchCourses, isInitialized: isDemoInitialized } = require("./routes/demo");
+app.use("/api/demo", demoRouter);
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 /**
  * GET /health
@@ -936,11 +940,13 @@ async function pollNotifications() {
       for (const [, w] of courses) {
         if (!w.notifyEnabled) continue;
 
-        const key = `${w.Semester ?? ""}::${w.CourseNo}`;
+        const isDemo = !!w.demo;
+        const key = `${isDemo ? "demo:" : ""}${w.Semester ?? ""}::${w.CourseNo}`;
         if (!courseMap.has(key)) {
           courseMap.set(key, {
             Semester: w.Semester ?? "1142",
             CourseNo: w.CourseNo,
+            isDemo,
             subscribers: [],
             maxAgeMs: effectiveInterval,
           });
@@ -964,7 +970,17 @@ async function pollNotifications() {
       let course;
       let isStale = false;
 
-      if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
+      if (entry.isDemo) {
+        // Demo courses: read directly from in-memory fake data.
+        if (isDemoInitialized()) {
+          const results = demoSearchCourses({ Semester: entry.Semester, CourseNo: entry.CourseNo });
+          course = results?.find((c) => c.CourseNo === entry.CourseNo) ?? null;
+          if (course) courseCache.set(key, { course, fetchedAt: now });
+        } else {
+          course = cached?.course ?? null;
+          isStale = true;
+        }
+      } else if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
         course = cached.course;
         console.log(
           `[NOTIFY] Cache hit for ${entry.CourseNo} (${Math.round((now - cached.fetchedAt) / 1000)}s old, max ${Math.round(entry.maxAgeMs / 1000)}s)`,
@@ -1094,6 +1110,8 @@ async function pollNotifications() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[SERVER] NTUST Notify API running on port ${PORT}`);
+
+  initDemo();
 
   if (db) {
     const authNote = AUTH_EMAILS.length
