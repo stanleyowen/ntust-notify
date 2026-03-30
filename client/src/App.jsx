@@ -424,7 +424,7 @@ function TrackerApp({ uid }) {
         )}
 
         {activeTab === "notifications" && (
-          <NotifyPrefsPanel prefs={prefs} onSave={savePrefs} />
+          <NotifyPrefsPanel prefs={prefs} onSave={savePrefs} demo={IS_DEMO} />
         )}
       </main>
 

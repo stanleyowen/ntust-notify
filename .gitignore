@@ -1,5 +1,5 @@
 .idea/
-.env
+**/.env
 node_modules/
 **/.DS_Store
 server/service-account.json

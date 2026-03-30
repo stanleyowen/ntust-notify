@@ -129,6 +129,19 @@ router.get("/health", (_req, res) => {
   });
 });
 
+router.get("/status", (_req, res) => {
+  res.json({
+    pollerReady: initialized,
+    hasAnyNotify: false,
+    isAuthUser: false,
+    requestedIntervalMs: 10_000,
+    effectiveIntervalMs: 10_000,
+    lastPolled: initialized ? new Date().toISOString() : null,
+    watching: [],
+    demo: true,
+  });
+});
+
 router.post("/courses", (req, res) => {
   if (!initialized) {
     return res.status(503).json({ error: "Demo data is still loading. Please retry shortly." });

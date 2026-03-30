@@ -31,7 +31,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
  * }} props - Component props.
  * @returns {JSX.Element}
  */
-function NotifyPrefsPanel({ prefs, onSave }) {
+function NotifyPrefsPanel({ prefs, onSave, demo = false }) {
   const [form, setForm] = useState({ ...prefs });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -148,12 +148,17 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     setStatusLoading(true);
     setStatusError(null);
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error("Not logged in");
-      const token = await user.getIdToken();
-      const res = await fetch(`${API_BASE}/api/notify/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      let res;
+      if (demo) {
+        res = await fetch(`${API_BASE}/api/demo/status`);
+      } else {
+        const user = auth.currentUser;
+        if (!user) throw new Error("Not logged in");
+        const token = await user.getIdToken();
+        res = await fetch(`${API_BASE}/api/notify/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatus(await res.json());
     } catch (err) {
