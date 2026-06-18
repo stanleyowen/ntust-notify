@@ -29,7 +29,7 @@ import { db } from "../firebase";
  *   isNotifyEnabled: (courseNo: string) => boolean,
  * }}
  */
-export function useWatchedCourses(uid, { demo = false } = {}) {
+export function useWatchedCourses(uid) {
   const [watchedCourses, setWatchedCourses] = useState([]); // array of { CourseNo, ... }
   const [loading, setLoading] = useState(false);
 
@@ -81,10 +81,9 @@ export function useWatchedCourses(uid, { demo = false } = {}) {
         ClassRoomNo: course.ClassRoomNo ?? "",
         Node: course.Node ?? "",
         addedAt: serverTimestamp(),
-        ...(demo ? { demo: true } : {}),
       });
     },
-    [uid, demo],
+    [uid],
   );
 
   /**

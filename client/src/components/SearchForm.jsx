@@ -95,7 +95,7 @@ function SearchForm({ query, onChange, onSearch, onStop, isPolling, loading }) {
           className="btn btn-primary"
           disabled={loading}
         >
-          {loading ? "Searching…" : isPolling ? "Refresh Now" : "Search & Watch"}
+          {loading ? "Searching…" : isPolling ? "Refresh now" : "Search"}
         </button>
 
         {isPolling && (
@@ -104,9 +104,13 @@ function SearchForm({ query, onChange, onSearch, onStop, isPolling, loading }) {
             className="btn btn-secondary"
             onClick={onStop}
           >
-            Stop Watching
+            Stop auto-refresh
           </button>
         )}
+
+        <span className="form-hint">
+          Auto-refreshes every 60s and alerts you the moment a slot opens.
+        </span>
       </div>
     </form>
   );

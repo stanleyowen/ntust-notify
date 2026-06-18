@@ -68,10 +68,11 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
 
   return (
     <tr className={full ? "row-full" : "row-open"}>
-      <td className="action-cell">
+      <td className="action-cell" data-label="Watch">
         <button
           className={`watch-btn ${watched ? "watch-btn-active" : ""}`}
           title={watched ? "Remove from watchlist" : "Add to watchlist"}
+          aria-pressed={watched}
           onClick={() =>
             watched ? onUnwatch(course.CourseNo) : onWatch(course)
           }
@@ -82,21 +83,22 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
           <button
             className={`notify-btn ${notifyOn ? "notify-btn-active" : ""}`}
             title={notifyOn ? "Notifications on — click to disable" : "Notifications off — click to enable"}
+            aria-pressed={notifyOn}
             onClick={() => onToggleNotify(course.CourseNo)}
           >
             🔔
           </button>
         )}
       </td>
-      <td>
+      <td data-label="Status">
         <span className={`status-badge ${full ? "badge-full" : "badge-open"}`}>
-          {full ? "FULL" : "OPEN"}
+          <span className="status-dot" /> {full ? "FULL" : "OPEN"}
         </span>
       </td>
-      <td className="code">{course.CourseNo}</td>
-      <td>{course.CourseName}</td>
-      <td>{course.CourseTeacher || "—"}</td>
-      <td>
+      <td className="code" data-label="Course No.">{course.CourseNo}</td>
+      <td data-label="Name">{course.CourseName}</td>
+      <td data-label="Teacher">{course.CourseTeacher || "—"}</td>
+      <td data-label="Enrollment">
         {hasEnrollment ? (
           <div className="enrollment">
             <span>
@@ -105,8 +107,8 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
             </span>
             <div className="progress-bar">
               <div
-                className="progress-fill"
-                style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: full ? "#ef4444" : "#22c55e" }}
+                className={`progress-fill ${full ? "progress-fill-full" : "progress-fill-open"}`}
+                style={{ width: `${Math.min(pct, 100)}%` }}
               />
             </div>
           </div>
@@ -114,9 +116,9 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
           "—"
         )}
       </td>
-      <td>{course.CreditPoint ?? "—"}</td>
-      <td>{course.ClassRoomNo || "—"}</td>
-      <td className="schedule">{formatNode(course.Node)}</td>
+      <td data-label="Credits">{course.CreditPoint ?? "—"}</td>
+      <td data-label="Room">{course.ClassRoomNo || "—"}</td>
+      <td className="schedule" data-label="Schedule">{formatNode(course.Node)}</td>
     </tr>
   );
 }
@@ -141,9 +143,33 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
 function CourseTable({ courses, loading, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
   if (loading && courses.length === 0) {
     return (
-      <div className="placeholder">
-        <div className="spinner" />
-        <p>Fetching courses…</p>
+      <div className="table-wrapper">
+        <table className="course-table course-table-skeleton">
+          <thead>
+            <tr>
+              <th>Watch</th>
+              <th>Status</th>
+              <th>Course No.</th>
+              <th>Name</th>
+              <th>Teacher</th>
+              <th>Enrollment</th>
+              <th>Credits</th>
+              <th>Room</th>
+              <th>Schedule</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <tr key={i}>
+                {Array.from({ length: 9 }).map((__, j) => (
+                  <td key={j}>
+                    <span className="skeleton-bar" />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
