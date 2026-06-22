@@ -215,8 +215,11 @@ function TrackerApp({ uid }) {
 
   /**
    * Loads the list of available semesters once so the search form can render a
-   * dropdown. If the current selection is no longer valid, it falls back to the
-   * most recent semester returned by the API.
+   * dropdown. Merges API results with FALLBACK_SEMESTERS so the current
+   * selection always remains available, even if the NTUST API has dropped older
+   * semesters from its list. Never mutates query.Semester — changing the
+   * semester state would recreate fetchCourses and retrigger the polling effect,
+   * causing a silent mid-search semester switch that returns 0 results.
    *
    * @returns {void}
    */
@@ -233,14 +236,17 @@ function TrackerApp({ uid }) {
         const data = await res.json();
         if (cancelled || !Array.isArray(data) || data.length === 0) return;
 
-        setSemesters(data);
-        setQuery((prev) =>
-          data.some((s) => s.Semester === prev.Semester)
-            ? prev
-            : { ...prev, Semester: data[0].Semester },
-        );
+        // Prepend any FALLBACK entries absent from the API so the current
+        // semester selection always has a matching <option>.
+        const merged = [
+          ...data,
+          ...FALLBACK_SEMESTERS.filter(
+            (fs) => !data.some((s) => s.Semester === fs.Semester),
+          ),
+        ];
+        setSemesters(merged);
       } catch {
-        // Keep the free-text fallback if the list can't be loaded.
+        // Keep the fallback list if the fetch fails.
       }
     }
 

@@ -284,6 +284,41 @@ app.get("/health", generalLimiter, (_req, res) => {
  * @param {import("express").Response} res - Express response object.
  * @returns {void}
  */
+/**
+ * Finds the minimum effective poll interval across all users who have a given
+ * course enabled for notifications. This is the rate at which NTUST is actually
+ * being polled for that course, which may be faster than any individual user's
+ * own interval when multiple subscribers exist.
+ *
+ * @param {string} courseNo - Course number to look up.
+ * @param {string} semester - Semester code for the course.
+ * @returns {number | null} Minimum interval in milliseconds, or null if no active subscribers.
+ */
+function getMinCourseInterval(courseNo, semester) {
+  let minInterval = Infinity;
+  for (const [watcherUid, watcherData] of usersData) {
+    const { email: watcherEmail, notifyPrefs: watcherPrefs } = watcherData;
+    if (!watcherPrefs.email && !watcherPrefs.discord) continue;
+
+    const watcherCourses = watchedCoursesData.get(watcherUid);
+    if (!watcherCourses) continue;
+
+    const wc = watcherCourses.get(courseNo);
+    if (!wc || !wc.notifyEnabled) continue;
+    if ((wc.Semester ?? "") !== semester) continue;
+
+    const isAuth =
+      AUTH_EMAILS.length > 0 &&
+      AUTH_EMAILS.includes(watcherEmail.toLowerCase());
+    const effective = Math.max(
+      watcherPrefs.pollInterval ?? 60_000,
+      isAuth ? 1_000 : 30_000,
+    );
+    if (effective < minInterval) minInterval = effective;
+  }
+  return minInterval === Infinity ? null : minInterval;
+}
+
 app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
   const uid = req.user.uid;
   const userData = usersData.get(uid);
@@ -320,11 +355,19 @@ app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
       }
       if (!w.notifyEnabled) skipReasons.push("bell not enabled for this course");
 
+      // The NTUST fetch rate for this course is driven by the fastest watcher
+      // across all subscribers, which may be shorter than this user's interval.
+      const sharedPollIntervalMs = getMinCourseInterval(
+        w.CourseNo,
+        w.Semester ?? "",
+      );
+
       watching.push({
         courseNo: w.CourseNo,
         courseName: w.CourseName ?? "",
         notifyEnabled: w.notifyEnabled ?? false,
         skipReasons,
+        sharedPollIntervalMs,
         state: state
           ? { wasFull: state.wasFull, notifiedOpen: state.notifiedOpen }
           : null,

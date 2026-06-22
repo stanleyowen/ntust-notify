@@ -355,10 +355,20 @@ function NotifyPrefsPanel({ prefs, onSave }) {
                       </ul>
                     ) : n ? (
                       <ul className="notify-course-stat-list">
-                        <li>NTUST fetches: {n.totalFetches} total, {n.consecutiveFailures} consecutive failure{n.consecutiveFailures !== 1 ? "s" : ""}</li>
+                        <li>NTUST fetches: {n.totalFetches} total (shared across all watchers), {n.consecutiveFailures} consecutive failure{n.consecutiveFailures !== 1 ? "s" : ""}</li>
                         {n.lastSuccessAt && <li>Last success: {new Date(n.lastSuccessAt).toLocaleTimeString()}</li>}
                         {n.lastErrorAt && <li style={{ color: "#ef4444" }}>Last error: {n.lastError} ({new Date(n.lastErrorAt).toLocaleTimeString()})</li>}
                         {w.cache && <li>Cached enrollment: {w.cache.chooseStudent} / {w.cache.restrict1} ({w.cache.ageSeconds}s ago)</li>}
+                        {w.sharedPollIntervalMs != null && (
+                          <li>
+                            NTUST poll rate: every {w.sharedPollIntervalMs / 1000}s
+                            {w.sharedPollIntervalMs < status.effectiveIntervalMs && (
+                              <span style={{ color: "#f59e0b" }}>
+                                {" "}— driven by a faster watcher; your alerts still arrive every {status.effectiveIntervalMs / 1000}s
+                              </span>
+                            )}
+                          </li>
+                        )}
                         {w.state && <li>Poller state: {w.state.wasFull ? "Full" : "Open"}{w.state.notifiedOpen ? " · notified" : ""}</li>}
                       </ul>
                     ) : (
