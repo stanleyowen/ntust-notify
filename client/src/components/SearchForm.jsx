@@ -15,7 +15,11 @@
  * }} props - Component props.
  * @returns {JSX.Element}
  */
+import { useTranslation } from "react-i18next";
+
 function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolling, loading }) {
+  const { t } = useTranslation();
+
   /**
    * Handles form submission by preventing the browser reload and delegating the
    * actual search logic to the parent component.
@@ -42,7 +46,7 @@ function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolli
     <form className="search-form" onSubmit={handleSubmit}>
       <div className="form-grid">
         <div className="form-group">
-          <label htmlFor="Semester">Semester</label>
+          <label htmlFor="Semester">{t("search.semester")}</label>
           <select
             id="Semester"
             name="Semester"
@@ -58,38 +62,38 @@ function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolli
         </div>
 
         <div className="form-group">
-          <label htmlFor="CourseNo">Course No.</label>
+          <label htmlFor="CourseNo">{t("search.courseNo")}</label>
           <input
             id="CourseNo"
             name="CourseNo"
             type="text"
             value={query.CourseNo}
             onChange={handleChange}
-            placeholder="e.g. CS3001"
+            placeholder={t("search.courseNoPlaceholder")}
           />
         </div>
 
         <div className="form-group">
-          <label htmlFor="CourseName">Course Name</label>
+          <label htmlFor="CourseName">{t("search.courseName")}</label>
           <input
             id="CourseName"
             name="CourseName"
             type="text"
             value={query.CourseName}
             onChange={handleChange}
-            placeholder="e.g. Java"
+            placeholder={t("search.courseNamePlaceholder")}
           />
         </div>
 
         <div className="form-group">
-          <label htmlFor="CourseTeacher">Teacher</label>
+          <label htmlFor="CourseTeacher">{t("search.teacher")}</label>
           <input
             id="CourseTeacher"
             name="CourseTeacher"
             type="text"
             value={query.CourseTeacher}
             onChange={handleChange}
-            placeholder="e.g. 陳教授"
+            placeholder={t("search.teacherPlaceholder")}
           />
         </div>
       </div>
@@ -100,7 +104,11 @@ function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolli
           className="btn btn-primary"
           disabled={loading}
         >
-          {loading ? "Searching…" : isPolling ? "Refresh now" : "Search"}
+          {loading
+            ? t("search.searching")
+            : isPolling
+              ? t("search.refreshNow")
+              : t("search.search")}
         </button>
 
         {isPolling && (
@@ -109,13 +117,11 @@ function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolli
             className="btn btn-secondary"
             onClick={onStop}
           >
-            Stop auto-refresh
+            {t("search.stopAutoRefresh")}
           </button>
         )}
 
-        <span className="form-hint">
-          Auto-refreshes every 60s and alerts you the moment a slot opens.
-        </span>
+        <span className="form-hint">{t("search.hint")}</span>
       </div>
     </form>
   );

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
 
 /**
@@ -10,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
  * @returns {JSX.Element}
  */
 function LoginPage() {
+  const { t } = useTranslation();
   const { signInWithGoogle } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -37,10 +39,15 @@ function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">📚</div>
-        <h1 className="login-title">NTUST Course Tracker</h1>
-        <p className="login-subtitle">
-          Monitor course availability and save your watchlist across devices.
-        </p>
+        <h1 className="login-title">{t("login.title")}</h1>
+        <p className="login-subtitle">{t("login.subtitle")}</p>
+
+        <ul className="login-features" aria-label={t("login.features")}>
+          <li>{t("login.feature1")}</li>
+          <li>{t("login.feature2")}</li>
+          <li>{t("login.feature3")}</li>
+          <li>{t("login.feature4")}</li>
+        </ul>
 
         <button
           className="btn-google"
@@ -70,7 +77,7 @@ function LoginPage() {
               fill="#EA4335"
             />
           </svg>
-          {loading ? "Signing in…" : "Sign in with Google"}
+          {loading ? t("login.signingIn") : t("login.signIn")}
         </button>
 
         {error && <p className="login-error">{error}</p>}

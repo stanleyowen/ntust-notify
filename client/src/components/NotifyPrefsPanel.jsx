@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { auth } from "../firebase";
 
 /**
@@ -31,7 +32,8 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
  * }} props - Component props.
  * @returns {JSX.Element}
  */
-function NotifyPrefsPanel({ prefs, onSave }) {
+function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount = 0 }) {
+  const { t, i18n } = useTranslation();
   const [form, setForm] = useState({ ...prefs });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -41,11 +43,11 @@ function NotifyPrefsPanel({ prefs, onSave }) {
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState(null);
   const [pollOptions, setPollOptions] = useState([
-    { label: "30 seconds", value: 30_000 },
-    { label: "1 minute", value: 60_000 },
-    { label: "3 minutes", value: 180_000 },
-    { label: "5 minutes", value: 300_000 },
-    { label: "10 minutes", value: 600_000 },
+    { labelKey: "notify.poll30s", value: 30_000 },
+    { labelKey: "notify.poll1m", value: 60_000 },
+    { labelKey: "notify.poll3m", value: 180_000 },
+    { labelKey: "notify.poll5m", value: 300_000 },
+    { labelKey: "notify.poll10m", value: 600_000 },
   ]);
 
   /**
@@ -124,14 +126,14 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     setTestResult(null);
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error("Not logged in");
+      if (!user) throw new Error(t("errors.notLoggedIn"));
       const token = await user.getIdToken();
       const res = await fetch(`${API_BASE}/api/notify/test`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      setTestResult(data.results ?? { error: data.error ?? "Unknown error" });
+      setTestResult(data.results ?? { error: data.error ?? t("errors.unknown") });
     } catch (err) {
       setTestResult({ error: err.message });
     } finally {
@@ -149,12 +151,12 @@ function NotifyPrefsPanel({ prefs, onSave }) {
     setStatusError(null);
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error("Not logged in");
+      if (!user) throw new Error(t("errors.notLoggedIn"));
       const token = await user.getIdToken();
       const res = await fetch(`${API_BASE}/api/notify/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(t("errors.http", { status: res.status }));
       const data = await res.json();
       setStatus(data);
     } catch (err) {
@@ -169,17 +171,56 @@ function NotifyPrefsPanel({ prefs, onSave }) {
    */
   const hasChannel = form.email || form.discord;
 
+  const setupSteps = [
+    {
+      done: watchedCount > 0,
+      label: t("notify.step1Label"),
+      hint: t("notify.step1Hint"),
+    },
+    {
+      done: hasChannel,
+      label: t("notify.step2Label"),
+      hint: t("notify.step2Hint"),
+    },
+    {
+      done: notifyEnabledCount > 0,
+      label: t("notify.step3Label"),
+      hint: t("notify.step3Hint"),
+    },
+  ];
+  const allSetupDone = setupSteps.every((s) => s.done);
+
   return (
     <div className="notify-prefs-panel">
       <div className="notify-prefs-panel-header">
-        <h2 className="notify-prefs-panel-title">Notification Preferences</h2>
-        <p className="notify-prefs-panel-subtitle">
-          Choose how you want to be alerted when a watched course opens up.
-          Toggle the 🔔 bell icon on any watched course to enable alerts for it.
-        </p>
+        <h2 className="notify-prefs-panel-title">{t("notify.title")}</h2>
+        <p className="notify-prefs-panel-subtitle">{t("notify.subtitlePanel")}</p>
       </div>
 
       <div className="notify-prefs-panel-body">
+        {/* ── Setup checklist ── */}
+        {!allSetupDone && (
+          <div className="setup-checklist" role="list" aria-label={t("notify.checklistAria")}>
+            <p className="setup-checklist-title">{t("notify.checklistTitle")}</p>
+            {setupSteps.map((step, i) => (
+              <div
+                key={i}
+                className={`setup-step${step.done ? " setup-step-done" : ""}`}
+                role="listitem"
+              >
+                <span className="setup-step-check" aria-hidden="true">
+                  {step.done ? "✓" : i + 1}
+                </span>
+                <div>
+                  <span className="setup-step-label">{step.label}</span>
+                  {!step.done && (
+                    <span className="setup-step-hint">{step.hint}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {/* ── Email ── */}
         <label className="notify-row">
           <div className="notify-row-left">
@@ -189,10 +230,8 @@ function NotifyPrefsPanel({ prefs, onSave }) {
               onChange={(e) => set("email", e.target.checked)}
             />
             <div>
-              <span className="notify-label">📧 Email</span>
-              <span className="notify-desc">
-                Send an email to your Google account address when a slot opens.
-              </span>
+              <span className="notify-label">{t("notify.emailLabel")}</span>
+              <span className="notify-desc">{t("notify.emailDesc")}</span>
             </div>
           </div>
         </label>
@@ -210,11 +249,9 @@ function NotifyPrefsPanel({ prefs, onSave }) {
                 <svg className="discord-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
                 </svg>
-                Discord
+                {t("notify.discordLabel")}
               </span>
-              <span className="notify-desc">
-                Post a message to a Discord channel via webhook.
-              </span>
+              <span className="notify-desc">{t("notify.discordDesc")}</span>
             </div>
           </div>
         </label>
@@ -223,7 +260,7 @@ function NotifyPrefsPanel({ prefs, onSave }) {
         {form.discord && (
           <div className="notify-sub">
             <div className="form-group">
-              <label htmlFor="discordWebhook">Webhook URL</label>
+              <label htmlFor="discordWebhook">{t("notify.webhookUrl")}</label>
               <input
                 id="discordWebhook"
                 type="url"
@@ -242,37 +279,51 @@ function NotifyPrefsPanel({ prefs, onSave }) {
                   onChange={(e) => set("discordTagMe", e.target.checked)}
                 />
                 <div>
-                  <span className="notify-label">Tag me in the message</span>
+                  <span className="notify-label">{t("notify.tagMe")}</span>
                 </div>
               </div>
             </label>
 
             {form.discordTagMe && (
               <div className="form-group">
-                <label htmlFor="discordUserId">Your Discord User ID</label>
+                <label htmlFor="discordUserId">{t("notify.discordUserId")}</label>
                 <input
                   id="discordUserId"
                   type="text"
                   value={form.discordUserId}
                   onChange={(e) => set("discordUserId", e.target.value)}
-                  placeholder="e.g. 123456789012345678"
+                  placeholder={t("notify.discordUserIdPlaceholder")}
                 />
-                <span className="field-hint">
-                  Enable Developer Mode in Discord → right-click your name →
-                  Copy User ID.
-                </span>
+                <span className="field-hint">{t("notify.discordUserIdHint")}</span>
               </div>
             )}
+
+            <details className="help-details">
+              <summary className="help-summary">{t("notify.helpSummary")}</summary>
+              <ol className="help-steps">
+                <li>{t("notify.helpStep1")}</li>
+                <li>
+                  <Trans i18nKey="notify.helpStep2" components={[<span key="0" />, <em key="1" />]} />
+                </li>
+                <li>
+                  <Trans i18nKey="notify.helpStep3" components={[<span key="0" />, <strong key="1" />]} />
+                </li>
+                <li>
+                  <Trans i18nKey="notify.helpStep4" components={[<span key="0" />, <strong key="1" />]} />
+                </li>
+                <li>{t("notify.helpStep5")}</li>
+              </ol>
+            </details>
           </div>
         )}
 
         {!hasChannel && (
-          <p className="notify-info">Select at least one channel to receive alerts.</p>
+          <p className="notify-info">{t("notify.selectChannel")}</p>
         )}
 
         {/* ── Poll interval ── */}
         <div className="form-group notify-interval-group">
-          <label htmlFor="pollInterval">Check interval</label>
+          <label htmlFor="pollInterval">{t("notify.checkInterval")}</label>
           <select
             id="pollInterval"
             value={form.pollInterval ?? 60_000}
@@ -280,25 +331,23 @@ function NotifyPrefsPanel({ prefs, onSave }) {
           >
             {pollOptions.map((o) => (
               <option key={o.value} value={o.value}>
-                {o.label}
+                {o.labelKey ? t(o.labelKey) : o.label}
               </option>
             ))}
           </select>
-          <span className="field-hint">
-            How often the server checks for open slots on your watched courses.
-          </span>
+          <span className="field-hint">{t("notify.intervalHint")}</span>
         </div>
 
         {/* ── Poller diagnostics ── */}
         <div className="notify-diagnostics">
           <div className="notify-diagnostics-header">
-            <span className="notify-label">Poller diagnostics</span>
+            <span className="notify-label">{t("notify.diagnostics")}</span>
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleRefreshStatus}
               disabled={statusLoading}
             >
-              {statusLoading ? "Loading…" : "🔄 Refresh status"}
+              {statusLoading ? t("notify.loading") : t("notify.refreshStatus")}
             </button>
           </div>
           {statusError && (
@@ -309,25 +358,40 @@ function NotifyPrefsPanel({ prefs, onSave }) {
               {/* Global poller health */}
               <div className="notify-course-stat">
                 <ul className="notify-course-stat-list" style={{ paddingLeft: 0, listStyle: "none" }}>
-                  <li>Poller ready: <strong>{status.pollerReady ? "✔ Yes" : "⧗ Seeding…"}</strong></li>
+                  <li>
+                    {t("notify.pollerReady")}{" "}
+                    <strong>{status.pollerReady ? t("notify.yes") : t("notify.seeding")}</strong>
+                  </li>
                   {status.hasAnyNotify != null && (
                     <li>
-                      Notification channels:{" "}
-                      <strong>{status.hasAnyNotify ? "✔ configured" : "✗ none enabled"}</strong>
-                      {!status.hasAnyNotify && <span style={{ color: "#f59e0b" }}> — enable email or Discord above</span>}
+                      {t("notify.channels")}{" "}
+                      <strong>{status.hasAnyNotify ? t("notify.configured") : t("notify.noneEnabled")}</strong>
+                      {!status.hasAnyNotify && <span style={{ color: "#f59e0b" }}>{t("notify.enableHint")}</span>}
                     </li>
                   )}
                   {status.requestedIntervalMs != null && status.effectiveIntervalMs != null && (
                     <li>
-                      Poll interval: requested <strong>{(status.requestedIntervalMs / 1000).toFixed(0)}s</strong>
-                      {" → "}effective <strong>{(status.effectiveIntervalMs / 1000).toFixed(0)}s</strong>
+                      <Trans
+                        i18nKey="notify.pollIntervalLine"
+                        values={{
+                          requested: (status.requestedIntervalMs / 1000).toFixed(0),
+                          effective: (status.effectiveIntervalMs / 1000).toFixed(0),
+                        }}
+                        components={[<span key="0" />, <strong key="1" />, <span key="2" />, <strong key="3" />]}
+                      />
                       {status.requestedIntervalMs !== status.effectiveIntervalMs && (
-                        <span style={{ color: "#f59e0b" }}> (capped — not an auth user)</span>
+                        <span style={{ color: "#f59e0b" }}>{t("notify.capped")}</span>
                       )}
                     </li>
                   )}
                   {status.lastPolled && (
-                    <li>Last polled: <strong>{new Date(status.lastPolled).toLocaleTimeString()}</strong></li>
+                    <li>
+                      <Trans
+                        i18nKey="notify.lastPolled"
+                        values={{ time: new Date(status.lastPolled).toLocaleTimeString(i18n.language) }}
+                        components={[<span key="0" />, <strong key="1" />]}
+                      />
+                    </li>
                   )}
                 </ul>
               </div>

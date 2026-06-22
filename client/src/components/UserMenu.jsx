@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
 
 /**
@@ -10,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
  * @returns {JSX.Element | null}
  */
 function UserMenu() {
+  const { t } = useTranslation();
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
 
@@ -25,7 +27,7 @@ function UserMenu() {
         {user.photoURL ? (
           <img
             src={user.photoURL}
-            alt={user.displayName ?? "User"}
+            alt={user.displayName ?? t("userMenu.user")}
             className="user-avatar"
             referrerPolicy="no-referrer"
           />
@@ -53,7 +55,7 @@ function UserMenu() {
                 await signOut();
               }}
             >
-              Sign out
+              {t("userMenu.signOut")}
             </button>
           </div>
         </>

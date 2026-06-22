@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import SearchForm from "./components/SearchForm";
 import CourseTable from "./components/CourseTable";
 import NotifyPrefsPanel from "./components/NotifyPrefsPanel";
 import LoginPage from "./components/LoginPage";
 import UserMenu from "./components/UserMenu";
+import LanguageSwitcher from "./components/LanguageSwitcher";
+import WelcomeBanner from "./components/WelcomeBanner";
 import { useAuth } from "./context/AuthContext";
 import { useWatchedCourses } from "./hooks/useWatchedCourses";
 import { useNotifyPrefs } from "./hooks/useNotifyPrefs";
@@ -76,6 +79,7 @@ function isFull(course) {
  * @returns {JSX.Element}
  */
 function TrackerApp({ uid }) {
+  const { t, i18n } = useTranslation();
   const {
     watchedCourses,
     watchCourse,
@@ -147,7 +151,7 @@ function TrackerApp({ uid }) {
   const fetchCourses = useCallback(
     async (isInitial = false) => {
       if (!query.CourseNo && !query.CourseName && !query.CourseTeacher) {
-        setError("Enter at least one search field — course no., name, or teacher.");
+        setError(t("errors.noSearchField"));
         return;
       }
 
@@ -186,7 +190,12 @@ function TrackerApp({ uid }) {
             const prev = prevStateRef.current.get(course.CourseNo);
             const nowFull = isFull(course);
             if (prev?.wasFull && !nowFull) {
-              addToast(`🎉 Slot opened: ${course.CourseNo} ${course.CourseName}`);
+              addToast(
+                t("toast.slotOpened", {
+                  courseNo: course.CourseNo,
+                  courseName: course.CourseName,
+                }),
+              );
             }
             prevStateRef.current.set(course.CourseNo, { wasFull: nowFull });
           });
@@ -197,7 +206,7 @@ function TrackerApp({ uid }) {
         setLoading(false);
       }
     },
-    [query, addToast],
+    [query, addToast, t],
   );
 
   /**
@@ -293,25 +302,28 @@ function TrackerApp({ uid }) {
               📚
             </span>
             <div>
-              <h1>NTUST Notify</h1>
-              <p className="subtitle">Track course availability in real time</p>
+              <h1>{t("common.appName")}</h1>
+              <p className="subtitle">{t("header.subtitle")}</p>
             </div>
           </div>
-          <UserMenu />
+          <div className="header-actions">
+            <LanguageSwitcher />
+            <UserMenu />
+          </div>
         </div>
 
-        <nav className="tabs" aria-label="Main sections">
+        <nav className="tabs" aria-label={t("header.nav")}>
           <button
             className={`tab ${activeTab === "search" ? "tab-active" : ""}`}
             onClick={() => setActiveTab("search")}
           >
-            <span aria-hidden="true">🔍</span> Search
+            <span aria-hidden="true">🔍</span> {t("header.tabSearch")}
           </button>
           <button
             className={`tab ${activeTab === "watched" ? "tab-active" : ""}`}
             onClick={() => setActiveTab("watched")}
           >
-            <span aria-hidden="true">★</span> Watchlist
+            <span aria-hidden="true">★</span> {t("header.tabWatchlist")}
             {watchedCourses.length > 0 && (
               <span className="tab-badge">{watchedCourses.length}</span>
             )}
@@ -320,12 +332,14 @@ function TrackerApp({ uid }) {
             className={`tab ${activeTab === "notifications" ? "tab-active" : ""}`}
             onClick={() => setActiveTab("notifications")}
           >
-            <span aria-hidden="true">🔔</span> Notifications
+            <span aria-hidden="true">🔔</span> {t("header.tabNotifications")}
           </button>
         </nav>
       </header>
 
       <main className="app-main">
+        <WelcomeBanner />
+
         {activeTab === "search" && (
           <SearchForm
             query={query}
@@ -347,14 +361,20 @@ function TrackerApp({ uid }) {
         {activeTab === "search" && lastUpdated && (
           <div className="status-bar">
             <span>
-              <strong>{courses.length}</strong> course
-              {courses.length !== 1 ? "s" : ""} found
+              <Trans
+                i18nKey="status.coursesFound"
+                count={courses.length}
+                values={{ count: courses.length }}
+                components={[<strong key="0" />]}
+              />
             </span>
             <span className="status-bar-right">
-              Updated {lastUpdated.toLocaleTimeString("zh-TW")}
+              {t("status.updated", {
+                time: lastUpdated.toLocaleTimeString(i18n.language),
+              })}
               {isPolling && (
                 <span className="polling-badge">
-                  <span className="pulse-dot" /> Auto-refreshing every 60s
+                  <span className="pulse-dot" /> {t("status.autoRefreshing")}
                 </span>
               )}
             </span>
@@ -364,11 +384,15 @@ function TrackerApp({ uid }) {
         {activeTab === "watched" && watchedCourses.length > 0 && (
           <div className="status-bar">
             <span>
-              <strong>{watchedCourses.length}</strong> watched ·{" "}
-              <span className="stat-open">{watchedOpen} open</span>
+              <Trans
+                i18nKey="status.watchedSummary"
+                values={{ count: watchedCourses.length, open: watchedOpen }}
+                components={[<strong key="0" />, <span key="1" />, <span key="2" className="stat-open" />]}
+              />
             </span>
             <span className="status-bar-right">
-              <span aria-hidden="true">🔔</span> {watchedNotify} with alerts on
+              <span aria-hidden="true">🔔</span>{" "}
+              {t("status.alertsOn", { count: watchedNotify })}
             </span>
           </div>
         )}
@@ -378,11 +402,8 @@ function TrackerApp({ uid }) {
             <span className="placeholder-icon" aria-hidden="true">
               🔎
             </span>
-            <p className="placeholder-title">Search for a course to get started</p>
-            <p className="placeholder-hint">
-              Fill in a course number, name, or teacher above, then hit Search.
-              Click ★ on any result to add it to your watchlist.
-            </p>
+            <p className="placeholder-title">{t("placeholder.searchTitle")}</p>
+            <p className="placeholder-hint">{t("placeholder.searchHint")}</p>
           </div>
         )}
 
@@ -391,10 +412,8 @@ function TrackerApp({ uid }) {
             <span className="placeholder-icon" aria-hidden="true">
               🗂️
             </span>
-            <p className="placeholder-title">No courses matched your search</p>
-            <p className="placeholder-hint">
-              Try a different course number, name, or teacher.
-            </p>
+            <p className="placeholder-title">{t("placeholder.noMatchTitle")}</p>
+            <p className="placeholder-hint">{t("placeholder.noMatchHint")}</p>
           </div>
         )}
 
@@ -403,10 +422,8 @@ function TrackerApp({ uid }) {
             <span className="placeholder-icon" aria-hidden="true">
               ⭐
             </span>
-            <p className="placeholder-title">Your watchlist is empty</p>
-            <p className="placeholder-hint">
-              Search for courses and click ★ to track them here.
-            </p>
+            <p className="placeholder-title">{t("placeholder.emptyWatchlistTitle")}</p>
+            <p className="placeholder-hint">{t("placeholder.emptyWatchlistHint")}</p>
           </div>
         )}
 
@@ -423,19 +440,24 @@ function TrackerApp({ uid }) {
         )}
 
         {activeTab === "notifications" && (
-          <NotifyPrefsPanel prefs={prefs} onSave={savePrefs} />
+          <NotifyPrefsPanel
+            prefs={prefs}
+            onSave={savePrefs}
+            watchedCount={watchedCourses.length}
+            notifyEnabledCount={watchedNotify}
+          />
         )}
       </main>
 
       {/* Toast notifications */}
       <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast" role="status">
-            <span className="toast-message">{t.message}</span>
+        {toasts.map((toast) => (
+          <div key={toast.id} className="toast" role="status">
+            <span className="toast-message">{toast.message}</span>
             <button
               className="toast-close"
-              onClick={() => dismissToast(t.id)}
-              aria-label="Dismiss notification"
+              onClick={() => dismissToast(toast.id)}
+              aria-label={t("toast.dismiss")}
             >
               ✕
             </button>

@@ -132,6 +132,41 @@ body {
   font-size: 0.86rem;
 }
 
+/* ── Header actions (language switcher + user menu) ── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.lang-switcher {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.lang-btn {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.lang-btn + .lang-btn {
+  border-left: 1px solid var(--border);
+}
+.lang-btn:hover {
+  background: var(--accent-soft);
+  color: #f5f8ff;
+}
+.lang-btn-active {
+  background: var(--accent-grad);
+  color: #fff;
+}
+
 .app-main {
   display: flex;
   flex-direction: column;
@@ -1088,6 +1123,266 @@ td.code {
   list-style: disc;
 }
 
+/* ── Welcome Wizard ── */
+.welcome-wizard {
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.1) 0%,
+    rgba(139, 92, 246, 0.06) 100%
+  );
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+.welcome-wizard::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--accent-grad);
+}
+
+/* ── Progress dots ── */
+.wizard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.75rem;
+}
+.wizard-dots {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.wizard-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: width 0.25s ease, background 0.25s ease, border-radius 0.25s ease,
+    opacity 0.25s ease;
+}
+.wizard-dot-active {
+  background: var(--accent);
+  width: 24px;
+}
+.wizard-dot-done {
+  background: var(--accent);
+  opacity: 0.35;
+}
+.wizard-skip-btn {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.wizard-skip-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* ── Step content ── */
+.wizard-step {
+  text-align: center;
+  padding: 0 1rem 2rem;
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+.wizard-icon {
+  font-size: 2.75rem;
+  line-height: 1;
+}
+.wizard-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f5f8ff;
+}
+.wizard-body {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+  max-width: 460px;
+}
+.wizard-body strong {
+  color: var(--text);
+}
+
+/* ── Step slide animations (triggered by key remount) ── */
+@keyframes wizardSlideInRight {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes wizardSlideInLeft {
+  from {
+    transform: translateX(-28px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.wizard-slide-forward {
+  animation: wizardSlideInRight 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.wizard-slide-backward {
+  animation: wizardSlideInLeft 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* ── Navigation row ── */
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 1rem;
+}
+.wizard-counter {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+/* ── Setup checklist (Notifications tab) ── */
+.setup-checklist {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.setup-checklist-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.15rem;
+}
+.setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.85rem;
+}
+.setup-step-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.setup-step-done .setup-step-check {
+  background: var(--success-soft);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: var(--success);
+}
+.setup-step-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+.setup-step-done .setup-step-label {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--border);
+}
+.setup-step-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-top: 0.1rem;
+  line-height: 1.4;
+}
+
+/* ── Login feature list ── */
+.login-features {
+  list-style: none;
+  padding: 0;
+  margin: 0.1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-align: left;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+.login-features li {
+  padding: 0.42rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  line-height: 1.4;
+}
+
+/* ── Discord help collapsible ── */
+.help-details {
+  margin-top: 0.35rem;
+}
+.help-summary {
+  cursor: pointer;
+  color: #818cf8;
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0.25rem 0;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.help-summary::-webkit-details-marker {
+  display: none;
+}
+.help-summary::before {
+  content: "▶";
+  font-size: 0.55rem;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.help-details[open] .help-summary::before {
+  transform: rotate(90deg);
+}
+.help-summary:hover {
+  color: #a5b4fc;
+}
+.help-steps {
+  margin: 0.55rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.79rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  line-height: 1.5;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Responsive — collapse the table into stacked cards on small screens
    ───────────────────────────────────────────────────────────────────────── */
@@ -1111,6 +1406,19 @@ td.code {
   .form-hint {
     margin-left: 0;
     flex-basis: 100%;
+  }
+  .welcome-wizard {
+    padding: 1.1rem;
+  }
+  .wizard-step {
+    padding: 0 0 1.5rem;
+    min-height: 150px;
+  }
+  .wizard-body {
+    font-size: 0.84rem;
+  }
+  .login-features {
+    font-size: 0.8rem;
   }
 
   .table-wrapper {

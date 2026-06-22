@@ -1,9 +1,12 @@
+import { useTranslation } from "react-i18next";
+
 /**
- * Maps NTUST weekday codes to readable day abbreviations.
+ * NTUST weekday codes, in display order. The readable label for each code is
+ * resolved at render time via i18n ("days.<code>").
  *
- * @type {Record<string, string>}
+ * @type {string[]}
  */
-const DAY_MAP = { M: "Mon", T: "Tue", W: "Wed", R: "Thu", F: "Fri", S: "Sat" };
+const DAY_CODES = ["M", "T", "W", "R", "F", "S"];
 
 /**
  * Maps NTUST period codes to display times.
@@ -24,14 +27,16 @@ const PERIOD_MAP = {
  * - Output: "Mon 08:10, Wed 10:10"
  *
  * @param {string} node - Raw NTUST schedule node string.
+ * @param {(key: string) => string} t - i18n translation function.
  * @returns {string}
  */
-function formatNode(node) {
-  if (!node) return "N/A";
+function formatNode(node, t) {
+  if (!node) return t("common.na");
   return node
     .split(",")
     .map((n) => {
-      const day = DAY_MAP[n[0]] ?? n[0];
+      const code = n[0];
+      const day = DAY_CODES.includes(code) ? t(`days.${code}`) : code;
       const period = n.slice(1);
       const time = PERIOD_MAP[isNaN(period) ? period : parseInt(period, 10)] ?? period;
       return `${day} ${time}`;
@@ -57,6 +62,7 @@ function formatNode(node) {
  * @returns {JSX.Element}
  */
 function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
+  const { t } = useTranslation();
   const limit = parseInt(course.Restrict1, 10);
   const enrolled = course.ChooseStudent;
   const hasEnrollment = !isNaN(limit) && limit > 0 && enrolled != null;
@@ -68,10 +74,10 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
 
   return (
     <tr className={full ? "row-full" : "row-open"}>
-      <td className="action-cell" data-label="Watch">
+      <td className="action-cell" data-label={t("table.watch")}>
         <button
           className={`watch-btn ${watched ? "watch-btn-active" : ""}`}
-          title={watched ? "Remove from watchlist" : "Add to watchlist"}
+          title={watched ? t("table.removeFromWatchlist") : t("table.addToWatchlist")}
           aria-pressed={watched}
           onClick={() =>
             watched ? onUnwatch(course.CourseNo) : onWatch(course)
@@ -82,7 +88,7 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
         {watched && (
           <button
             className={`notify-btn ${notifyOn ? "notify-btn-active" : ""}`}
-            title={notifyOn ? "Notifications on — click to disable" : "Notifications off — click to enable"}
+            title={notifyOn ? t("table.notifyOn") : t("table.notifyOff")}
             aria-pressed={notifyOn}
             onClick={() => onToggleNotify(course.CourseNo)}
           >
@@ -90,20 +96,20 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
           </button>
         )}
       </td>
-      <td data-label="Status">
+      <td data-label={t("table.status")}>
         <span className={`status-badge ${full ? "badge-full" : "badge-open"}`}>
-          <span className="status-dot" /> {full ? "FULL" : "OPEN"}
+          <span className="status-dot" /> {full ? t("table.full") : t("table.open")}
         </span>
       </td>
-      <td className="code" data-label="Course No.">{course.CourseNo}</td>
-      <td data-label="Name">{course.CourseName}</td>
-      <td data-label="Teacher">{course.CourseTeacher || "—"}</td>
-      <td data-label="Enrollment">
+      <td className="code" data-label={t("table.courseNo")}>{course.CourseNo}</td>
+      <td data-label={t("table.name")}>{course.CourseName}</td>
+      <td data-label={t("table.teacher")}>{course.CourseTeacher || t("common.dash")}</td>
+      <td data-label={t("table.enrollment")}>
         {hasEnrollment ? (
           <div className="enrollment">
             <span>
               {enrolled} / {limit}
-              <span className="remaining"> ({remaining} left)</span>
+              <span className="remaining"> {t("table.left", { count: remaining })}</span>
             </span>
             <div className="progress-bar">
               <div
@@ -113,12 +119,12 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
             </div>
           </div>
         ) : (
-          "—"
+          t("common.dash")
         )}
       </td>
-      <td data-label="Credits">{course.CreditPoint ?? "—"}</td>
-      <td data-label="Room">{course.ClassRoomNo || "—"}</td>
-      <td className="schedule" data-label="Schedule">{formatNode(course.Node)}</td>
+      <td data-label={t("table.credits")}>{course.CreditPoint ?? t("common.dash")}</td>
+      <td data-label={t("table.room")}>{course.ClassRoomNo || t("common.dash")}</td>
+      <td className="schedule" data-label={t("table.schedule")}>{formatNode(course.Node, t)}</td>
     </tr>
   );
 }
@@ -141,21 +147,29 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
  * @returns {JSX.Element | null}
  */
 function CourseTable({ courses, loading, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
+  const { t } = useTranslation();
+
+  const headers = [
+    t("table.watch"),
+    t("table.status"),
+    t("table.courseNo"),
+    t("table.name"),
+    t("table.teacher"),
+    t("table.enrollment"),
+    t("table.credits"),
+    t("table.room"),
+    t("table.schedule"),
+  ];
+
   if (loading && courses.length === 0) {
     return (
       <div className="table-wrapper">
         <table className="course-table course-table-skeleton">
           <thead>
             <tr>
-              <th>Watch</th>
-              <th>Status</th>
-              <th>Course No.</th>
-              <th>Name</th>
-              <th>Teacher</th>
-              <th>Enrollment</th>
-              <th>Credits</th>
-              <th>Room</th>
-              <th>Schedule</th>
+              {headers.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -183,15 +197,9 @@ function CourseTable({ courses, loading, isWatched, onWatch, onUnwatch, isNotify
       <table className="course-table">
         <thead>
           <tr>
-            <th>Watch</th>
-            <th>Status</th>
-            <th>Course No.</th>
-            <th>Name</th>
-            <th>Teacher</th>
-            <th>Enrollment</th>
-            <th>Credits</th>
-            <th>Room</th>
-            <th>Schedule</th>
+            {headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
