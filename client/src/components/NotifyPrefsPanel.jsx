@@ -414,29 +414,29 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
                     {skipped ? (
                       <ul className="notify-course-stat-list">
                         {w.skipReasons.map((r) => (
-                          <li key={r} style={{ color: "#f59e0b" }}>⚠ Skipped: {r}</li>
+                          <li key={r} style={{ color: "#f59e0b" }}>{t("notify.skipped", { reason: r })}</li>
                         ))}
                       </ul>
                     ) : n ? (
                       <ul className="notify-course-stat-list">
-                        <li>NTUST fetches: {n.totalFetches} total (shared across all watchers), {n.consecutiveFailures} consecutive failure{n.consecutiveFailures !== 1 ? "s" : ""}</li>
-                        {n.lastSuccessAt && <li>Last success: {new Date(n.lastSuccessAt).toLocaleTimeString()}</li>}
-                        {n.lastErrorAt && <li style={{ color: "#ef4444" }}>Last error: {n.lastError} ({new Date(n.lastErrorAt).toLocaleTimeString()})</li>}
-                        {w.cache && <li>Cached enrollment: {w.cache.chooseStudent} / {w.cache.restrict1} ({w.cache.ageSeconds}s ago)</li>}
+                        <li>{t("notify.ntustFetches", { count: n.consecutiveFailures, total: n.totalFetches, failures: n.consecutiveFailures })}</li>
+                        {n.lastSuccessAt && <li>{t("notify.lastSuccess", { time: new Date(n.lastSuccessAt).toLocaleTimeString(i18n.language) })}</li>}
+                        {n.lastErrorAt && <li style={{ color: "#ef4444" }}>{t("notify.lastError", { error: n.lastError, time: new Date(n.lastErrorAt).toLocaleTimeString(i18n.language) })}</li>}
+                        {w.cache && <li>{t("notify.cachedEnrollment", { enrolled: w.cache.chooseStudent, limit: w.cache.restrict1, age: w.cache.ageSeconds })}</li>}
                         {w.sharedPollIntervalMs != null && (
                           <li>
-                            NTUST poll rate: every {w.sharedPollIntervalMs / 1000}s
+                            {t("notify.ntustPollRate", { seconds: w.sharedPollIntervalMs / 1000 })}
                             {w.sharedPollIntervalMs < status.effectiveIntervalMs && (
                               <span style={{ color: "#f59e0b" }}>
-                                {" "}— driven by a faster watcher; your alerts still arrive every {status.effectiveIntervalMs / 1000}s
+                                {t("notify.drivenByFaster", { seconds: status.effectiveIntervalMs / 1000 })}
                               </span>
                             )}
                           </li>
                         )}
-                        {w.state && <li>Poller state: {w.state.wasFull ? "Full" : "Open"}{w.state.notifiedOpen ? " · notified" : ""}</li>}
+                        {w.state && <li>{t("notify.pollerState", { state: w.state.wasFull ? t("notify.stateFull") : t("notify.stateOpen") })}{w.state.notifiedOpen ? t("notify.notified") : ""}</li>}
                       </ul>
                     ) : (
-                      <p className="notify-desc">No fetch data yet — poller hasn’t run for this course.</p>
+                      <p className="notify-desc">{t("notify.noFetchData")}</p>
                     )}
                   </div>
                 );
@@ -452,19 +452,19 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? "Saving…" : "Save preferences"}
+          {saving ? t("notify.saving") : t("notify.savePreferences")}
         </button>
         {hasChannel && (
           <button
             className="btn btn-secondary"
             onClick={handleTest}
             disabled={testing || saving}
-            title="Send a test alert to verify your Discord / email channel"
+            title={t("notify.testTitle")}
           >
-            {testing ? "Sending…" : "🔔 Test notification"}
+            {testing ? t("notify.sending") : t("notify.testNotification")}
           </button>
         )}
-        {saved && <span className="notify-saved-badge">✓ Saved</span>}
+        {saved && <span className="notify-saved-badge">{t("notify.saved")}</span>}
         {testResult && !testing && (
           <span className="notify-saved-badge" style={{ background: testResult.error ? "#ef4444" : undefined }}>
             {testResult.error
@@ -478,7 +478,7 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" · ") || "Sent"}
+                  .join(" · ") || t("notify.sent")}
           </span>
         )}
       </div>

@@ -45,4 +45,20 @@ i18n
     },
   });
 
+/**
+ * Keep the document's <html lang> attribute in sync with the active language so
+ * screen readers and the browser apply the correct language metadata.
+ *
+ * @param {string} lng - The newly active language code.
+ * @returns {void}
+ */
+function syncHtmlLang(lng) {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = lng;
+  }
+}
+
+syncHtmlLang(i18n.resolvedLanguage);
+i18n.on("languageChanged", syncHtmlLang);
+
 export default i18n;

@@ -34,8 +34,8 @@
     "coursesFound_other": "找到 <0>{{count}}</0> 門課程",
     "updated": "更新於 {{time}}",
     "autoRefreshing": "每 60 秒自動重新整理",
-    "watchedSummary": "已關注 <0>{{count}}</0> 門 · <2>{{open}} 門有名額</2>",
-    "alertsOn": "{{count}} 門已開啟提醒"
+    "watchedSummary": "已關注 <0>{{watched}}</0> 門 · <2>{{open}} 門有名額</2>",
+    "alertsOn": "{{n}} 門已開啟提醒"
   },
   "placeholder": {
     "searchTitle": "搜尋課程以開始使用",
@@ -71,7 +71,7 @@
     "notifyOff": "提醒已關閉 — 點選以開啟",
     "full": "已額滿",
     "open": "有名額",
-    "left": "(剩 {{count}} 個)"
+    "left": "(剩 {{n}} 個)"
   },
   "days": {
     "M": "週一",

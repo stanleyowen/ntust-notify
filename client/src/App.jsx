@@ -386,13 +386,13 @@ function TrackerApp({ uid }) {
             <span>
               <Trans
                 i18nKey="status.watchedSummary"
-                values={{ count: watchedCourses.length, open: watchedOpen }}
+                values={{ watched: watchedCourses.length, open: watchedOpen }}
                 components={[<strong key="0" />, <span key="1" />, <span key="2" className="stat-open" />]}
               />
             </span>
             <span className="status-bar-right">
               <span aria-hidden="true">🔔</span>{" "}
-              {t("status.alertsOn", { count: watchedNotify })}
+              {t("status.alertsOn", { n: watchedNotify })}
             </span>
           </div>
         )}

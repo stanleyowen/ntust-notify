@@ -35,8 +35,8 @@
     "coursesFound_other": "<0>{{count}}</0> courses found",
     "updated": "Updated {{time}}",
     "autoRefreshing": "Auto-refreshing every 60s",
-    "watchedSummary": "<0>{{count}}</0> watched · <2>{{open}} open</2>",
-    "alertsOn": "{{count}} with alerts on"
+    "watchedSummary": "<0>{{watched}}</0> watched · <2>{{open}} open</2>",
+    "alertsOn": "{{n}} with alerts on"
   },
   "placeholder": {
     "searchTitle": "Search for a course to get started",
@@ -72,7 +72,7 @@
     "notifyOff": "Notifications off — click to enable",
     "full": "FULL",
     "open": "OPEN",
-    "left": "({{count}} left)"
+    "left": "({{n}} left)"
   },
   "days": {
     "M": "Mon",

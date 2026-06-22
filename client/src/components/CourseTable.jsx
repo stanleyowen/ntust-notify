@@ -109,7 +109,7 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
           <div className="enrollment">
             <span>
               {enrolled} / {limit}
-              <span className="remaining"> {t("table.left", { count: remaining })}</span>
+              <span className="remaining"> {t("table.left", { n: remaining })}</span>
             </span>
             <div className="progress-bar">
               <div
