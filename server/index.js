@@ -21,6 +21,28 @@ const PORT = process.env.PORT || 3000;
  */
 const NTUST_API = "https://querycourse.ntust.edu.tw/QueryCourse/api/courses";
 
+/**
+ * Upstream NTUST endpoint that lists available semesters.
+ *
+ * @type {string}
+ */
+const NTUST_SEMESTERS_API =
+  "https://querycourse.ntust.edu.tw/QueryCourse/api/semestersinfo";
+
+/**
+ * In-memory cache for the semester list, which changes rarely.
+ *
+ * @type {{ data: Array<Record<string, any>> | null, fetchedAt: number }}
+ */
+let semestersCache = { data: null, fetchedAt: 0 };
+
+/**
+ * How long a cached semester list stays fresh, in milliseconds.
+ *
+ * @type {number}
+ */
+const SEMESTERS_TTL_MS = 60 * 60 * 1000;
+
 // ─── Auth emails & poll intervals ────────────────────────────────────────────
 // AUTH_EMAILS: comma-separated list of email addresses that may poll as fast as
 // 1 s. All other users are capped at a 30 s minimum.
@@ -444,6 +466,45 @@ app.get("/api/poll-options", generalLimiter, async (req, res) => {
     });
   } catch {
     return res.json({ minInterval: 30_000, options: NORMAL_POLL_OPTIONS });
+  }
+});
+
+/**
+ * GET /api/semesters
+ *
+ * Proxies the NTUST semester list to the frontend so the search form can offer
+ * a dropdown of valid semesters instead of a free-text field.
+ *
+ * The result is cached in memory for an hour and, on upstream failure, a stale
+ * cached copy is served when available.
+ *
+ * @param {import("express").Request} _req - Express request object.
+ * @param {import("express").Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
+app.get("/api/semesters", generalLimiter, async (_req, res) => {
+  const now = Date.now();
+  if (semestersCache.data && now - semestersCache.fetchedAt < SEMESTERS_TTL_MS) {
+    return res.json(semestersCache.data);
+  }
+
+  try {
+    const response = await axios.get(NTUST_SEMESTERS_API, { timeout: 15000 });
+    if (!Array.isArray(response.data)) {
+      return res
+        .status(502)
+        .json({ error: "Unexpected response format from NTUST API" });
+    }
+    semestersCache = { data: response.data, fetchedAt: now };
+    return res.json(response.data);
+  } catch (err) {
+    console.error("[ERROR] Failed to fetch semesters:", err.message);
+    // Serve a stale copy if we have one rather than failing the dropdown.
+    if (semestersCache.data) return res.json(semestersCache.data);
+    return res.status(502).json({
+      error: "Failed to fetch semesters from NTUST API",
+      detail: err.message,
+    });
   }
 });
 

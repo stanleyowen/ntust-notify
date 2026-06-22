@@ -33,6 +33,22 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const POLL_INTERVAL_MS = 60_000;
 
 /**
+ * Built-in semester list used to seed the dropdown so it always renders, even
+ * before (or if) the live list from the backend loads.
+ *
+ * @type {Array<{ Semester: string, EngSemester: string }>}
+ */
+const FALLBACK_SEMESTERS = [
+  { Semester: "1151", EngSemester: "2026 Fall" },
+  { Semester: "114H", EngSemester: "2026 Summer" },
+  { Semester: "1142", EngSemester: "2026 Spring" },
+  { Semester: "1141", EngSemester: "2025 Fall" },
+  { Semester: "113H", EngSemester: "2025 Summer" },
+  { Semester: "1132", EngSemester: "2025 Spring" },
+  { Semester: "1131", EngSemester: "2024 Fall" },
+];
+
+/**
  * Determines whether a course is currently full.
  *
  * @param {{ Restrict1: string | number, ChooseStudent: number }} course - Course record returned by the backend.
@@ -77,6 +93,7 @@ function TrackerApp({ uid }) {
     CourseTeacher: "",
   });
 
+  const [semesters, setSemesters] = useState(FALLBACK_SEMESTERS);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -197,6 +214,43 @@ function TrackerApp({ uid }) {
   }, [isPolling, fetchCourses]);
 
   /**
+   * Loads the list of available semesters once so the search form can render a
+   * dropdown. If the current selection is no longer valid, it falls back to the
+   * most recent semester returned by the API.
+   *
+   * @returns {void}
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSemesters() {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch(`${API_BASE}/api/semesters`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+
+        setSemesters(data);
+        setQuery((prev) =>
+          data.some((s) => s.Semester === prev.Semester)
+            ? prev
+            : { ...prev, Semester: data[0].Semester },
+        );
+      } catch {
+        // Keep the free-text fallback if the list can't be loaded.
+      }
+    }
+
+    loadSemesters();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
    * Starts a fresh polling session for the current search query.
    *
    * @returns {void}
@@ -269,6 +323,7 @@ function TrackerApp({ uid }) {
         {activeTab === "search" && (
           <SearchForm
             query={query}
+            semesters={semesters}
             onChange={setQuery}
             onSearch={handleSearch}
             onStop={handleStopPolling}

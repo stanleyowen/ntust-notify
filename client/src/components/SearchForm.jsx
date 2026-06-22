@@ -6,6 +6,7 @@
  *
  * @param {{
  *   query: { Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string },
+ *   semesters: Array<{ Semester: string, EngSemester?: string }>,
  *   onChange: import("react").Dispatch<import("react").SetStateAction<{ Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string }>>,
  *   onSearch: () => void,
  *   onStop: () => void,
@@ -14,7 +15,7 @@
  * }} props - Component props.
  * @returns {JSX.Element}
  */
-function SearchForm({ query, onChange, onSearch, onStop, isPolling, loading }) {
+function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolling, loading }) {
   /**
    * Handles form submission by preventing the browser reload and delegating the
    * actual search logic to the parent component.
@@ -42,14 +43,18 @@ function SearchForm({ query, onChange, onSearch, onStop, isPolling, loading }) {
       <div className="form-grid">
         <div className="form-group">
           <label htmlFor="Semester">Semester</label>
-          <input
+          <select
             id="Semester"
             name="Semester"
-            type="text"
             value={query.Semester}
             onChange={handleChange}
-            placeholder="e.g. 1142"
-          />
+          >
+            {semesters.map((s) => (
+              <option key={s.Semester} value={s.Semester}>
+                {s.EngSemester ? `${s.EngSemester} (${s.Semester})` : s.Semester}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="form-group">

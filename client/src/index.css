@@ -209,6 +209,7 @@ body {
   letter-spacing: 0.06em;
 }
 .form-group input,
+.form-group select,
 .notify-interval-group select {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -218,7 +219,33 @@ body {
   font-size: 0.95rem;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
+.form-group select,
+.notify-interval-group select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  color-scheme: dark;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2393a1be' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 16px;
+}
+.form-group select:hover,
+.notify-interval-group select:hover {
+  border-color: var(--text-faint);
+}
+.form-group select:focus,
+.notify-interval-group select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a5b4fc' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+.form-group select option,
+.notify-interval-group select option {
+  background: var(--surface);
+  color: var(--text);
+}
 .form-group input:focus,
+.form-group select:focus,
 .notify-interval-group select:focus {
   outline: none;
   border-color: var(--accent);
@@ -1012,8 +1039,6 @@ td.code {
 }
 .notify-interval-group select {
   width: 100%;
-  cursor: pointer;
-  appearance: auto;
 }
 
 /* ── Poller diagnostics ── */
