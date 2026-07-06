@@ -1,48 +1,6 @@
 import { useTranslation } from "react-i18next";
-
-/**
- * NTUST weekday codes, in display order. The readable label for each code is
- * resolved at render time via i18n ("days.<code>").
- *
- * @type {string[]}
- */
-const DAY_CODES = ["M", "T", "W", "R", "F", "S"];
-
-/**
- * Maps NTUST period codes to display times.
- *
- * @type {Record<string, string>}
- */
-const PERIOD_MAP = {
-  1: "08:10", 2: "09:10", 3: "10:10", 4: "11:10", 5: "12:10",
-  6: "13:10", 7: "14:10", 8: "15:10", 9: "16:10", 10: "17:10",
-  11: "18:10", 12: "19:10", A: "07:10", n: "12:10", N: "13:10",
-};
-
-/**
- * Converts an NTUST schedule node string into a human-readable display string.
- *
- * Example:
- * - Input: "M1,W3"
- * - Output: "Mon 08:10, Wed 10:10"
- *
- * @param {string} node - Raw NTUST schedule node string.
- * @param {(key: string) => string} t - i18n translation function.
- * @returns {string}
- */
-function formatNode(node, t) {
-  if (!node) return t("common.na");
-  return node
-    .split(",")
-    .map((n) => {
-      const code = n[0];
-      const day = DAY_CODES.includes(code) ? t(`days.${code}`) : code;
-      const period = n.slice(1);
-      const time = PERIOD_MAP[isNaN(period) ? period : parseInt(period, 10)] ?? period;
-      return `${day} ${time}`;
-    })
-    .join(", ");
-}
+import { enrollment, formatNode } from "../utils/course";
+import { BellIcon, StarIcon } from "./icons";
 
 /**
  * Renders a single course row inside the course table.
@@ -63,58 +21,62 @@ function formatNode(node, t) {
  */
 function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onToggleNotify }) {
   const { t } = useTranslation();
-  const limit = parseInt(course.Restrict1, 10);
-  const enrolled = course.ChooseStudent;
-  const hasEnrollment = !isNaN(limit) && limit > 0 && enrolled != null;
-  const full = hasEnrollment && enrolled >= limit;
-  const remaining = hasEnrollment ? Math.max(0, limit - enrolled) : "?";
-  const pct = hasEnrollment ? (enrolled / limit) * 100 : 0;
+  const e = enrollment(course);
   const watched = isWatched(course.CourseNo);
   const notifyOn = watched && isNotifyEnabled(course.CourseNo);
+  const watchTitle = watched
+    ? t("table.removeFromWatchlist")
+    : t("table.addToWatchlist");
+  const notifyTitle = notifyOn ? t("table.notifyOn") : t("table.notifyOff");
 
   return (
-    <tr className={full ? "row-full" : "row-open"}>
+    <tr className={e.full ? "row-full" : "row-open"}>
       <td className="action-cell" data-label={t("table.watch")}>
         <button
           className={`watch-btn ${watched ? "watch-btn-active" : ""}`}
-          title={watched ? t("table.removeFromWatchlist") : t("table.addToWatchlist")}
+          title={watchTitle}
+          aria-label={watchTitle}
           aria-pressed={watched}
           onClick={() =>
             watched ? onUnwatch(course.CourseNo) : onWatch(course)
           }
         >
-          {watched ? "★" : "☆"}
+          <StarIcon filled={watched} />
         </button>
         {watched && (
           <button
             className={`notify-btn ${notifyOn ? "notify-btn-active" : ""}`}
-            title={notifyOn ? t("table.notifyOn") : t("table.notifyOff")}
+            title={notifyTitle}
+            aria-label={notifyTitle}
             aria-pressed={notifyOn}
             onClick={() => onToggleNotify(course.CourseNo)}
           >
-            🔔
+            <BellIcon filled={notifyOn} />
           </button>
         )}
       </td>
       <td data-label={t("table.status")}>
-        <span className={`status-badge ${full ? "badge-full" : "badge-open"}`}>
-          <span className="status-dot" /> {full ? t("table.full") : t("table.open")}
+        <span className={`status-badge ${e.full ? "badge-full" : "badge-open"}`}>
+          <span className="status-dot" /> {e.full ? t("table.full") : t("table.open")}
         </span>
       </td>
       <td className="code" data-label={t("table.courseNo")}>{course.CourseNo}</td>
       <td data-label={t("table.name")}>{course.CourseName}</td>
       <td data-label={t("table.teacher")}>{course.CourseTeacher || t("common.dash")}</td>
       <td data-label={t("table.enrollment")}>
-        {hasEnrollment ? (
+        {e.hasEnrollment ? (
           <div className="enrollment">
             <span>
-              {enrolled} / {limit}
-              <span className="remaining"> {t("table.left", { n: remaining })}</span>
+              {e.enrolled} / {e.limit}
+              <span className={`remaining ${e.full ? "" : "remaining-open"}`}>
+                {" "}
+                {t("table.left", { n: e.remaining })}
+              </span>
             </span>
             <div className="progress-bar">
               <div
-                className={`progress-fill ${full ? "progress-fill-full" : "progress-fill-open"}`}
-                style={{ width: `${Math.min(pct, 100)}%` }}
+                className={`progress-fill ${e.full ? "progress-fill-full" : "progress-fill-open"}`}
+                style={{ width: `${e.pct}%` }}
               />
             </div>
           </div>
@@ -130,10 +92,9 @@ function CourseRow({ course, isWatched, onWatch, onUnwatch, isNotifyEnabled, onT
 }
 
 /**
- * Renders the main course results table.
+ * Renders the main course results table for the search tab.
  *
- * The table is reused both for search results and for the user's watchlist. It
- * also handles the two empty/loading states before rendering rows.
+ * It also handles the two empty/loading states before rendering rows.
  *
  * @param {{
  *   courses: Array<Record<string, any>>,

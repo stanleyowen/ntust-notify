@@ -1,23 +1,6 @@
-/**
- * Search form used to collect NTUST course query criteria.
- *
- * The form is controlled by the parent component, which owns the query object.
- * Submitting the form starts or refreshes the client-side polling flow.
- *
- * @param {{
- *   query: { Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string },
- *   semesters: Array<{ Semester: string, EngSemester?: string }>,
- *   onChange: import("react").Dispatch<import("react").SetStateAction<{ Semester: string, CourseNo: string, CourseName: string, CourseTeacher: string }>>,
- *   onSearch: () => void,
- *   onStop: () => void,
- *   isPolling: boolean,
- *   loading: boolean,
- * }} props - Component props.
- * @returns {JSX.Element}
- */
 import { useTranslation } from "react-i18next";
 
-function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolling, loading }) {
+function SearchForm({ query, semesters = [], onChange, onSearch, loading }) {
   const { t } = useTranslation();
 
   /**
@@ -104,24 +87,8 @@ function SearchForm({ query, semesters = [], onChange, onSearch, onStop, isPolli
           className="btn btn-primary"
           disabled={loading}
         >
-          {loading
-            ? t("search.searching")
-            : isPolling
-              ? t("search.refreshNow")
-              : t("search.search")}
+          {loading ? t("search.searching") : t("search.search")}
         </button>
-
-        {isPolling && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={onStop}
-          >
-            {t("search.stopAutoRefresh")}
-          </button>
-        )}
-
-        <span className="form-hint">{t("search.hint")}</span>
       </div>
     </form>
   );

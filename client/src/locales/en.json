@@ -25,18 +25,38 @@
     "courseNamePlaceholder": "e.g. Java",
     "teacherPlaceholder": "e.g. 陳教授",
     "searching": "Searching…",
-    "refreshNow": "Refresh now",
-    "search": "Search",
-    "stopAutoRefresh": "Stop auto-refresh",
-    "hint": "Auto-refreshes every 60s and alerts you the moment a slot opens."
+    "search": "Search"
   },
   "status": {
-    "coursesFound_one": "<0>{{count}}</0> course found",
-    "coursesFound_other": "<0>{{count}}</0> courses found",
+    "updated": "Updated {{time}}"
+  },
+  "filter": {
+    "label": "Filter results by status",
+    "all": "All",
+    "open": "Open",
+    "full": "Full",
+    "emptyOpen": "No open courses in these results",
+    "emptyFull": "No full courses in these results",
+    "emptyHint": "Switch the filter above to see the rest of the results."
+  },
+  "watchlist": {
+    "statWatched": "Watched",
+    "statOpen": "Open now",
+    "statFull": "Full",
+    "statAlerts": "Alerts on",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
     "updated": "Updated {{time}}",
-    "autoRefreshing": "Auto-refreshing every 60s",
-    "watchedSummary": "<0>{{watched}}</0> watched · <2>{{open}} open</2>",
-    "alertsOn": "{{n}} with alerts on"
+    "alerts": "Alerts",
+    "alertsOnTitle": "Alerts on — you'll be notified when a seat opens",
+    "alertsOffTitle": "Alerts off — turn on to be notified when a seat opens",
+    "seatsLeft_one": "{{count}} seat left",
+    "seatsLeft_other": "{{count}} seats left",
+    "noSeats": "No seats left",
+    "enrolled": "{{enrolled}} / {{limit}} enrolled",
+    "credits": "{{n}} credits",
+    "remove": "Remove",
+    "removeTitle": "Remove {{courseNo}} from watchlist"
   },
   "placeholder": {
     "searchTitle": "Search for a course to get started",
@@ -45,10 +65,6 @@
     "noMatchHint": "Try a different course number, name, or teacher.",
     "emptyWatchlistTitle": "Your watchlist is empty",
     "emptyWatchlistHint": "Search for courses and click ★ to track them here."
-  },
-  "toast": {
-    "slotOpened": "🎉 Slot opened: {{courseNo}} {{courseName}}",
-    "dismiss": "Dismiss notification"
   },
   "errors": {
     "noSearchField": "Enter at least one search field — course no., name, or teacher.",
@@ -106,16 +122,15 @@
     "next": "Next →",
     "getStarted": "Get started ✓",
     "step1Title": "Search for your course",
-    "step1Body": "Go to the <1>Search</1> tab, pick your semester, then enter a course number, name, or teacher. Click <3>Search</3> — results auto-refresh every 60 seconds while you watch.",
+    "step1Body": "Go to the <1>Search</1> tab, pick your semester, then enter a course number, name, or teacher. Hit <3>Search</3> any time to get the latest enrollment numbers.",
     "step2Title": "Watch it & enable alerts",
-    "step2Body": "Click <1>★</1> on any result to add it to your Watchlist. Then click <3>🔔</3> next to a watched course to turn on slot-opening alerts for it specifically.",
+    "step2Body": "Click <1>★</1> on any result to add it to your Watchlist. Then flip the <3>Alerts</3> switch on its card (or click the bell in search results) to turn on slot-opening alerts for it.",
     "step3Title": "Get notified instantly",
     "step3Body": "Open the <1>Notifications</1> tab to connect email or a Discord webhook. The server monitors your courses 24/7 and sends an alert the moment a slot opens — even with your browser closed."
   },
   "notify": {
     "title": "Notification Preferences",
-    "subtitlePanel": "Choose how you want to be alerted when a watched course opens up. Toggle the 🔔 bell icon on any watched course to enable alerts for it.",
-    "subtitleModal": "Choose how you want to be alerted when a watched course opens up.",
+    "subtitlePanel": "Choose how you want to be alerted when a watched course opens up. Flip the Alerts switch on any watched course to enable alerts for it.",
     "checklistTitle": "Setup checklist",
     "checklistAria": "Setup checklist",
     "step1Label": "Add a course to your Watchlist",
@@ -123,7 +138,7 @@
     "step2Label": "Enable a notification channel",
     "step2Hint": "Toggle Email or Discord below, then Save",
     "step3Label": "Turn on alerts for a watched course",
-    "step3Hint": "Watchlist tab → click 🔔 next to a course",
+    "step3Hint": "Watchlist tab → flip the Alerts switch on a course",
     "emailLabel": "📧 Email",
     "emailDesc": "Send an email to your Google account address when a slot opens.",
     "discordLabel": "Discord",
@@ -175,14 +190,10 @@
     "noFetchData": "No fetch data yet — poller hasn’t run for this course.",
     "saving": "Saving…",
     "savePreferences": "Save preferences",
-    "save": "Save",
-    "cancel": "Cancel",
     "sending": "Sending…",
     "testNotification": "🔔 Test notification",
     "testTitle": "Send a test alert to verify your Discord / email channel",
     "saved": "✓ Saved",
-    "sent": "Sent",
-    "close": "Close",
-    "dialogAria": "Notification settings"
+    "sent": "Sent"
   }
 }

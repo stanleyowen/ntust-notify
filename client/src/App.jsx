@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslation, Trans } from "react-i18next";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import SearchForm from "./components/SearchForm";
 import CourseTable from "./components/CourseTable";
+import WatchlistPanel from "./components/WatchlistPanel";
 import NotifyPrefsPanel from "./components/NotifyPrefsPanel";
 import LoginPage from "./components/LoginPage";
 import UserMenu from "./components/UserMenu";
@@ -11,6 +12,7 @@ import { useAuth } from "./context/AuthContext";
 import { useWatchedCourses } from "./hooks/useWatchedCourses";
 import { useNotifyPrefs } from "./hooks/useNotifyPrefs";
 import { auth } from "./firebase";
+import { isFull } from "./utils/course";
 import "./index.css";
 
 /**
@@ -33,8 +35,6 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
  *
  * @type {number}
  */
-const POLL_INTERVAL_MS = 60_000;
-
 /**
  * Built-in semester list used to seed the dropdown so it always renders, even
  * before (or if) the live list from the backend loads.
@@ -50,17 +50,6 @@ const FALLBACK_SEMESTERS = [
   { Semester: "1132", EngSemester: "2025 Spring" },
   { Semester: "1131", EngSemester: "2024 Fall" },
 ];
-
-/**
- * Determines whether a course is currently full.
- *
- * @param {{ Restrict1: string | number, ChooseStudent: number }} course - Course record returned by the backend.
- * @returns {boolean}
- */
-function isFull(course) {
-  const limit = parseInt(course.Restrict1, 10);
-  return !isNaN(limit) && limit > 0 && course.ChooseStudent >= limit;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inner component – only rendered when the user is authenticated.
@@ -103,53 +92,14 @@ function TrackerApp({ uid }) {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [toasts, setToasts] = useState([]);
-  const [isPolling, setIsPolling] = useState(false);
   const [activeTab, setActiveTab] = useState("search");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [liveWatched, setLiveWatched] = useState(() => new Map());
+  const [watchlistRefreshing, setWatchlistRefreshing] = useState(false);
+  const [watchlistUpdated, setWatchlistUpdated] = useState(null);
 
-  /**
-   * Stores the previous known fullness state for each searched course so the UI
-   * can surface a toast when a course transitions from FULL to OPEN while the
-   * user is actively watching the search results page.
-   *
-   * @type {import("react").MutableRefObject<Map<string, { wasFull: boolean }>>}
-   */
-  const prevStateRef = useRef(new Map());
-
-  /**
-   * Removes a toast by id.
-   *
-   * @param {number} id - Toast identifier.
-   * @returns {void}
-   */
-  const dismissToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
-
-  /**
-   * Adds a temporary toast notification to the UI and removes it automatically
-   * after a short delay.
-   *
-   * @param {string} message - Message text to display in the toast.
-   * @returns {void}
-   */
-  const addToast = useCallback(
-    (message) => {
-      const id = Date.now() + Math.random();
-      setToasts((prev) => [...prev, { id, message }]);
-      setTimeout(() => dismissToast(id), 8000);
-    },
-    [dismissToast],
-  );
-
-  /**
-   * Fetches courses for the current query from the backend.
-   *
-   * @param {boolean} [isInitial=false] - Whether this fetch is the first cycle of a polling session.
-   * @returns {Promise<void>}
-   */
   const fetchCourses = useCallback(
-    async (isInitial = false) => {
+    async () => {
       if (!query.CourseNo && !query.CourseName && !query.CourseTeacher) {
         setError(t("errors.noSearchField"));
         return;
@@ -178,49 +128,14 @@ function TrackerApp({ uid }) {
         setCourses(data);
         setHasSearched(true);
         setLastUpdated(new Date());
-
-        if (isInitial) {
-          // Seed state on first fetch – no alerts yet.
-          const map = new Map();
-          data.forEach((c) => map.set(c.CourseNo, { wasFull: isFull(c) }));
-          prevStateRef.current = map;
-        } else {
-          // Check for slot openings relative to the previous poll result.
-          data.forEach((course) => {
-            const prev = prevStateRef.current.get(course.CourseNo);
-            const nowFull = isFull(course);
-            if (prev?.wasFull && !nowFull) {
-              addToast(
-                t("toast.slotOpened", {
-                  courseNo: course.CourseNo,
-                  courseName: course.CourseName,
-                }),
-              );
-            }
-            prevStateRef.current.set(course.CourseNo, { wasFull: nowFull });
-          });
-        }
       } catch (err) {
         setError(err.message);
       } finally {
         setLoading(false);
       }
     },
-    [query, addToast, t],
+    [query, t],
   );
-
-  /**
-   * Starts or stops the client-side polling loop depending on isPolling.
-   *
-   * @returns {void}
-   */
-  useEffect(() => {
-    if (!isPolling) return;
-
-    fetchCourses(true);
-    const intervalId = setInterval(() => fetchCourses(false), POLL_INTERVAL_MS);
-    return () => clearInterval(intervalId);
-  }, [isPolling, fetchCourses]);
 
   /**
    * Loads the list of available semesters once so the search form can render a
@@ -266,32 +181,110 @@ function TrackerApp({ uid }) {
   }, []);
 
   /**
-   * Starts a fresh polling session for the current search query.
+   * Latest watchlist snapshot, readable from the stable refreshWatchlist
+   * callback without retriggering the tab-open effect on every Firestore sync.
    *
-   * @returns {void}
+   * @type {import("react").MutableRefObject<Array<Record<string, any>>>}
    */
-  function handleSearch() {
-    setIsPolling(false);
-    setTimeout(() => setIsPolling(true), 0);
-  }
+  const watchedRef = useRef(watchedCourses);
+  useEffect(() => {
+    watchedRef.current = watchedCourses;
+  }, [watchedCourses]);
 
   /**
-   * Stops the client-side search polling loop.
+   * Fetches live enrollment for every watched course via the course-search
+   * proxy. Firestore only stores enrollment as of the moment the course was
+   * starred, so without this the watchlist would show stale seat counts.
+   *
+   * Runs one request per watched course (the NTUST API has no batch lookup);
+   * triggered only on tab open and manual refresh to stay well inside the
+   * backend's 30 req/min course-route rate limit.
+   *
+   * @returns {Promise<void>}
+   */
+  const refreshWatchlist = useCallback(async () => {
+    const watched = watchedRef.current;
+    if (watched.length === 0) return;
+
+    setWatchlistRefreshing(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const results = await Promise.all(
+        watched.map(async (c) => {
+          try {
+            const res = await fetch(`${API_BASE}/api/courses`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                Semester: c.Semester ?? "",
+                CourseNo: c.CourseNo,
+                CourseName: "",
+                CourseTeacher: "",
+              }),
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            return Array.isArray(data)
+              ? (data.find((d) => d.CourseNo === c.CourseNo) ?? null)
+              : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      setLiveWatched((prev) => {
+        const next = new Map(prev);
+        results.forEach((r) => {
+          if (r) next.set(r.CourseNo, r);
+        });
+        return next;
+      });
+      setWatchlistUpdated(new Date());
+    } finally {
+      setWatchlistRefreshing(false);
+    }
+  }, []);
+
+  /**
+   * Refreshes live watchlist enrollment whenever the Watchlist tab is opened.
    *
    * @returns {void}
    */
-  function handleStopPolling() {
-    setIsPolling(false);
+  useEffect(() => {
+    if (activeTab === "watched") refreshWatchlist();
+  }, [activeTab, refreshWatchlist]);
+
+  /**
+   * Watched courses overlaid with the freshest enrollment data. notifyEnabled
+   * always comes from Firestore since the NTUST record doesn't carry it.
+   */
+  const mergedWatched = useMemo(
+    () =>
+      watchedCourses.map((c) => {
+        const live = liveWatched.get(c.CourseNo);
+        return live ? { ...c, ...live, notifyEnabled: c.notifyEnabled } : c;
+      }),
+    [watchedCourses, liveWatched],
+  );
+
+  function handleSearch() {
+    fetchCourses();
   }
 
-  const displayedCourses = activeTab === "watched" ? watchedCourses : courses;
-  const showCourseTable = activeTab === "search" || activeTab === "watched";
+  // Search result counts + client-side status filter.
+  const openCount = courses.filter((c) => !isFull(c)).length;
+  const filteredCourses =
+    statusFilter === "open"
+      ? courses.filter((c) => !isFull(c))
+      : statusFilter === "full"
+        ? courses.filter(isFull)
+        : courses;
 
-  // Watchlist summary stats.
-  const watchedOpen = watchedCourses.filter((c) => !isFull(c)).length;
-  const watchedNotify = watchedCourses.filter((c) =>
-    isNotifyEnabled(c.CourseNo),
-  ).length;
+  const watchedNotify = mergedWatched.filter((c) => c.notifyEnabled).length;
 
   return (
     <div className="app">
@@ -346,8 +339,6 @@ function TrackerApp({ uid }) {
             semesters={semesters}
             onChange={setQuery}
             onSearch={handleSearch}
-            onStop={handleStopPolling}
-            isPolling={isPolling}
             loading={loading}
           />
         )}
@@ -360,39 +351,32 @@ function TrackerApp({ uid }) {
 
         {activeTab === "search" && lastUpdated && (
           <div className="status-bar">
-            <span>
-              <Trans
-                i18nKey="status.coursesFound"
-                count={courses.length}
-                values={{ count: courses.length }}
-                components={[<strong key="0" />]}
-              />
-            </span>
+            <div
+              className="filter-chips"
+              role="group"
+              aria-label={t("filter.label")}
+            >
+              {[
+                { key: "all", count: courses.length },
+                { key: "open", count: openCount },
+                { key: "full", count: courses.length - openCount },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={`chip chip-${f.key} ${statusFilter === f.key ? "chip-active" : ""}`}
+                  aria-pressed={statusFilter === f.key}
+                  onClick={() => setStatusFilter(f.key)}
+                >
+                  {t(`filter.${f.key}`)}
+                  <span className="chip-count">{f.count}</span>
+                </button>
+              ))}
+            </div>
             <span className="status-bar-right">
               {t("status.updated", {
                 time: lastUpdated.toLocaleTimeString(i18n.language),
               })}
-              {isPolling && (
-                <span className="polling-badge">
-                  <span className="pulse-dot" /> {t("status.autoRefreshing")}
-                </span>
-              )}
-            </span>
-          </div>
-        )}
-
-        {activeTab === "watched" && watchedCourses.length > 0 && (
-          <div className="status-bar">
-            <span>
-              <Trans
-                i18nKey="status.watchedSummary"
-                values={{ watched: watchedCourses.length, open: watchedOpen }}
-                components={[<strong key="0" />, <span key="1" />, <span key="2" className="stat-open" />]}
-              />
-            </span>
-            <span className="status-bar-right">
-              <span aria-hidden="true">🔔</span>{" "}
-              {t("status.alertsOn", { n: watchedNotify })}
             </span>
           </div>
         )}
@@ -417,6 +401,21 @@ function TrackerApp({ uid }) {
           </div>
         )}
 
+        {activeTab === "search" &&
+          hasSearched &&
+          !loading &&
+          courses.length > 0 &&
+          filteredCourses.length === 0 && (
+            <div className="placeholder placeholder-compact">
+              <p className="placeholder-title">
+                {statusFilter === "open"
+                  ? t("filter.emptyOpen")
+                  : t("filter.emptyFull")}
+              </p>
+              <p className="placeholder-hint">{t("filter.emptyHint")}</p>
+            </div>
+          )}
+
         {activeTab === "watched" && watchedCourses.length === 0 && (
           <div className="placeholder">
             <span className="placeholder-icon" aria-hidden="true">
@@ -427,15 +426,26 @@ function TrackerApp({ uid }) {
           </div>
         )}
 
-        {showCourseTable && (
+        {activeTab === "search" && (
           <CourseTable
-            courses={displayedCourses}
-            loading={loading && activeTab === "search"}
+            courses={filteredCourses}
+            loading={loading}
             isWatched={isWatched}
             onWatch={watchCourse}
             onUnwatch={unwatchCourse}
             isNotifyEnabled={isNotifyEnabled}
             onToggleNotify={toggleNotify}
+          />
+        )}
+
+        {activeTab === "watched" && watchedCourses.length > 0 && (
+          <WatchlistPanel
+            courses={mergedWatched}
+            refreshing={watchlistRefreshing}
+            lastUpdated={watchlistUpdated}
+            onRefresh={refreshWatchlist}
+            onToggleNotify={toggleNotify}
+            onUnwatch={unwatchCourse}
           />
         )}
 
@@ -449,21 +459,6 @@ function TrackerApp({ uid }) {
         )}
       </main>
 
-      {/* Toast notifications */}
-      <div className="toast-container">
-        {toasts.map((toast) => (
-          <div key={toast.id} className="toast" role="status">
-            <span className="toast-message">{toast.message}</span>
-            <button
-              className="toast-close"
-              onClick={() => dismissToast(toast.id)}
-              aria-label={t("toast.dismiss")}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
