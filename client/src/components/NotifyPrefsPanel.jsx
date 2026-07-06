@@ -37,6 +37,7 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
   const [form, setForm] = useState({ ...prefs });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // null | { discord, email }
   const [status, setStatus] = useState(null); // null | API response
@@ -100,19 +101,40 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
     setSaved(false);
+    setSaveError(null);
   }
 
   /**
    * Persists the current notification settings through the parent save handler.
    *
+   * The webhook format check mirrors the Firestore security rules — anything
+   * that isn't a real Discord webhook URL would be rejected server-side anyway,
+   * so catching it here gives immediate feedback instead of a silent failure.
+   *
    * @returns {Promise<void>}
    */
   async function handleSave() {
+    const webhook = (form.discordWebhook ?? "").trim();
+    if (
+      form.discord &&
+      webhook &&
+      !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)
+    ) {
+      setSaveError(t("notify.invalidWebhook"));
+      return;
+    }
+
     setSaving(true);
-    await onSave(form);
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setSaveError(null);
+    try {
+      await onSave({ ...form, discordWebhook: webhook });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   /**
@@ -465,6 +487,15 @@ function NotifyPrefsPanel({ prefs, onSave, watchedCount = 0, notifyEnabledCount 
           </button>
         )}
         {saved && <span className="notify-saved-badge">{t("notify.saved")}</span>}
+        {saveError && (
+          <span
+            className="notify-saved-badge"
+            style={{ background: "var(--danger-soft)", color: "#f87171" }}
+            role="alert"
+          >
+            ✗ {saveError}
+          </span>
+        )}
         {testResult && !testing && (
           <span className="notify-saved-badge" style={{ background: testResult.error ? "#ef4444" : undefined }}>
             {testResult.error

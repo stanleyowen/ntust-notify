@@ -154,6 +154,7 @@
     "helpStep4": "為它命名，然後點選<1>複製 Webhook 網址</1>。",
     "helpStep5": "將網址貼到上方欄位並儲存。",
     "selectChannel": "請至少選擇一個管道以接收提醒。",
+    "invalidWebhook": "Webhook 網址必須以 https://discord.com/api/webhooks/ 開頭",
     "checkInterval": "檢查間隔",
     "intervalHint": "伺服器多久檢查一次你關注課程是否有釋出名額。",
     "poll30s": "30 秒",

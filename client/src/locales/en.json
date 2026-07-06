@@ -155,6 +155,7 @@
     "helpStep4": "Give it a name, then click <1>Copy Webhook URL</1>.",
     "helpStep5": "Paste the URL into the field above and save.",
     "selectChannel": "Select at least one channel to receive alerts.",
+    "invalidWebhook": "Webhook URL must start with https://discord.com/api/webhooks/",
     "checkInterval": "Check interval",
     "intervalHint": "How often the server checks for open slots on your watched courses.",
     "poll30s": "30 seconds",

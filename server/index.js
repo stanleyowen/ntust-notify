@@ -189,14 +189,19 @@ app.use(
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
+    // No cookies are used — auth is via Bearer tokens — so credentialed
+    // cross-origin requests stay disabled.
   }),
 );
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-// Trust the first proxy hop (nginx, Caddy, etc.) so express-rate-limit can read
-// the real client IP from X-Forwarded-For instead of the proxy's IP.
-app.set("trust proxy", 1);
+// TRUST_PROXY controls how many proxy hops to trust when reading the client IP
+// from X-Forwarded-For (used by express-rate-limit). Set it to the number of
+// reverse proxies in front of this server (nginx, Caddy, Cloudflare, …), or 0
+// when clients connect directly — trusting a hop that doesn't exist lets
+// clients spoof X-Forwarded-For and dodge per-IP rate limits.
+const TRUST_PROXY = Number.parseInt(process.env.TRUST_PROXY ?? "1", 10);
+app.set("trust proxy", Number.isFinite(TRUST_PROXY) ? TRUST_PROXY : 1);
 app.use(helmet());
 app.use(express.json({ limit: "16kb" }));
 
@@ -311,7 +316,7 @@ function getMinCourseInterval(courseNo, semester) {
       AUTH_EMAILS.length > 0 &&
       AUTH_EMAILS.includes(watcherEmail.toLowerCase());
     const effective = Math.max(
-      watcherPrefs.pollInterval ?? 60_000,
+      sanitizeInterval(watcherPrefs.pollInterval),
       isAuth ? 1_000 : 30_000,
     );
     if (effective < minInterval) minInterval = effective;
@@ -327,7 +332,7 @@ app.get("/api/notify/status", generalLimiter, requireAuth, (req, res) => {
 
   const isAuthUser =
     AUTH_EMAILS.length > 0 && AUTH_EMAILS.includes(userEmail.toLowerCase());
-  const requestedInterval = notifyPrefs.pollInterval ?? 60_000;
+  const requestedInterval = sanitizeInterval(notifyPrefs.pollInterval);
   const effectiveInterval = Math.max(
     requestedInterval,
     isAuthUser ? 1_000 : 30_000,
@@ -546,7 +551,6 @@ app.get("/api/semesters", generalLimiter, async (_req, res) => {
     if (semestersCache.data) return res.json(semestersCache.data);
     return res.status(502).json({
       error: "Failed to fetch semesters from NTUST API",
-      detail: err.message,
     });
   }
 });
@@ -564,12 +568,27 @@ app.get("/api/semesters", generalLimiter, async (_req, res) => {
  * @param {import("express").Response} res - Express response object.
  * @returns {Promise<void>}
  */
+/**
+ * Coerces a client-supplied search field to a trimmed, length-capped string.
+ * Non-string values (objects, arrays, numbers) are rejected as empty rather
+ * than forwarded upstream.
+ *
+ * @param {unknown} value - Raw request body field.
+ * @param {number} maxLen - Maximum allowed length.
+ * @returns {string}
+ */
+function cleanSearchField(value, maxLen) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxLen);
+}
+
 app.post("/api/courses", courseLimiter, requireAuth, async (req, res) => {
+  const body = req.body ?? {};
   const payload = {
-    Semester: req.body.Semester ?? "1142",
-    CourseNo: req.body.CourseNo ?? "",
-    CourseName: req.body.CourseName ?? "",
-    CourseTeacher: req.body.CourseTeacher ?? "",
+    Semester: cleanSearchField(body.Semester, 10) || "1142",
+    CourseNo: cleanSearchField(body.CourseNo, 20),
+    CourseName: cleanSearchField(body.CourseName, 100),
+    CourseTeacher: cleanSearchField(body.CourseTeacher, 50),
     Dimension: "",
     CourseNotes: "",
     ForeignLanguage: 0,
@@ -598,12 +617,73 @@ app.post("/api/courses", courseLimiter, requireAuth, async (req, res) => {
     console.error("[ERROR] Failed to fetch courses:", err.message);
     return res.status(502).json({
       error: "Failed to fetch courses from NTUST API",
-      detail: err.message,
     });
   }
 });
 
 // ─── Notification helpers ─────────────────────────────────────────────────────
+
+/**
+ * Validates that a user-supplied webhook URL actually points at Discord.
+ *
+ * The webhook value is written by the client directly to Firestore, so the
+ * backend must treat it as untrusted: without this check a malicious user
+ * could store an internal URL (cloud metadata service, localhost, LAN hosts)
+ * and make this server POST to it on demand via /api/notify/test — a classic
+ * SSRF vector.
+ *
+ * @param {unknown} url - User-supplied webhook URL.
+ * @returns {boolean}
+ */
+function isValidDiscordWebhook(url) {
+  if (typeof url !== "string" || url.length > 300) return false;
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === "https:" &&
+      (u.hostname === "discord.com" || u.hostname === "discordapp.com") &&
+      u.pathname.startsWith("/api/webhooks/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Escapes HTML special characters in a value before it is interpolated into
+ * an HTML email body. Course fields come from the upstream NTUST API and are
+ * not under our control.
+ *
+ * @param {unknown} value - Raw value to escape.
+ * @returns {string}
+ */
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Coerces a user-supplied poll interval into a safe integer.
+ *
+ * notifyPrefs is client-writable in Firestore, so pollInterval may be a
+ * string, NaN, negative, or missing. Without this guard, a NaN interval makes
+ * every `elapsed < interval` comparison false and the user gets polled every
+ * poller cycle — silently bypassing the minimum-interval cap.
+ *
+ * @param {unknown} value - Raw pollInterval value from notifyPrefs.
+ * @param {number} [fallback=60000] - Interval used when the value is invalid.
+ * @returns {number} Integer interval in ms, clamped to [1s, 1h].
+ */
+function sanitizeInterval(value, fallback = 60_000) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), 1_000), 3_600_000);
+}
+
 /**
  * Determines whether a course is currently full.
  *
@@ -702,6 +782,10 @@ function formatNode(node) {
 async function sendDiscordNotification(course, notify) {
   const webhookUrl = notify.discordWebhook;
   if (!webhookUrl) return;
+  if (!isValidDiscordWebhook(webhookUrl)) {
+    console.warn("[DISCORD] Refusing to send: webhook URL is not a Discord webhook.");
+    throw new Error("Invalid Discord webhook URL — must start with https://discord.com/api/webhooks/");
+  }
 
   const limit = parseInt(course.Restrict1, 10);
   const enrolled = course.ChooseStudent;
@@ -733,13 +817,15 @@ async function sendDiscordNotification(course, notify) {
     url: "https://querycourse.ntust.edu.tw",
   };
 
+  // Discord user IDs are numeric snowflakes; anything else is dropped so
+  // arbitrary text (e.g. @everyone) can't be injected into the message body.
   const mention =
-    notify.discordTagMe && notify.discordUserId
+    notify.discordTagMe && /^\d{5,25}$/.test(String(notify.discordUserId ?? ""))
       ? `<@${notify.discordUserId}>`
       : "";
 
   try {
-    await axios.post(webhookUrl, { content: mention, embeds: [embed] });
+    await axios.post(webhookUrl, { content: mention, embeds: [embed] }, { timeout: 10_000, maxRedirects: 0 });
     console.log(`[DISCORD] Sent alert for ${course.CourseNo}`);
   } catch (err) {
     console.error("[DISCORD] Failed to send webhook:", err.message);
@@ -767,18 +853,18 @@ async function sendEmailNotification(course, toEmail) {
     <div style="font-family:sans-serif;max-width:560px;margin:auto">
       <h2 style="color:#22c55e">🎉 A slot just opened!</h2>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
-        <tr><td style="padding:6px;color:#6b7280">Course No.</td><td style="padding:6px;font-weight:600">${course.CourseNo}</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Name</td><td style="padding:6px;font-weight:600">${course.CourseName}</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Teacher</td><td style="padding:6px">${course.CourseTeacher || "N/A"}</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Enrollment</td><td style="padding:6px">${enrolled} / ${isNaN(limit) ? "?" : limit} (${remaining} remaining)</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Credits</td><td style="padding:6px">${course.CreditPoint ?? "?"}</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Room</td><td style="padding:6px">${course.ClassRoomNo || "N/A"}</td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Schedule</td><td style="padding:6px">${formatNode(course.Node)}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Course No.</td><td style="padding:6px;font-weight:600">${escapeHtml(course.CourseNo)}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Name</td><td style="padding:6px;font-weight:600">${escapeHtml(course.CourseName)}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Teacher</td><td style="padding:6px">${escapeHtml(course.CourseTeacher || "N/A")}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Enrollment</td><td style="padding:6px">${escapeHtml(enrolled)} / ${isNaN(limit) ? "?" : limit} (${escapeHtml(remaining)} remaining)</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Credits</td><td style="padding:6px">${escapeHtml(course.CreditPoint ?? "?")}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Room</td><td style="padding:6px">${escapeHtml(course.ClassRoomNo || "N/A")}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Schedule</td><td style="padding:6px">${escapeHtml(formatNode(course.Node))}</td></tr>
       </table>
       <p style="margin-top:16px">
         <a href="https://querycourse.ntust.edu.tw" style="background:#6366f1;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open Course Query</a>
       </p>
-      <p style="color:#9ca3af;font-size:12px;margin-top:24px">Semester ${course.Semester} • NTUST Course Tracker</p>
+      <p style="color:#9ca3af;font-size:12px;margin-top:24px">Semester ${escapeHtml(course.Semester)} • NTUST Course Tracker</p>
     </div>
   `;
 
@@ -1025,7 +1111,7 @@ async function pollNotifications() {
       const isAuthUser =
         AUTH_EMAILS.length > 0 && AUTH_EMAILS.includes(userEmail.toLowerCase());
       const minInterval = isAuthUser ? 1_000 : 30_000;
-      const requestedInterval = notifyPrefs.pollInterval ?? 60_000;
+      const requestedInterval = sanitizeInterval(notifyPrefs.pollInterval);
       const effectiveInterval = Math.max(requestedInterval, minInterval);
 
       const lastPolled = userLastPolled.get(uid) ?? 0;
@@ -1165,9 +1251,18 @@ async function pollNotifications() {
             `[NOTIFY] Slot opened for ${entry.CourseNo} — notifying uid ${sub.uid}`,
           );
 
+          // One subscriber's bad webhook or SMTP hiccup must not abort the
+          // rest of the poll cycle.
           const n = sub.notify;
-          if (n.discord) await sendDiscordNotification(course, n);
-          if (n.email) await sendEmailNotification(course, sub.email);
+          try {
+            if (n.discord) await sendDiscordNotification(course, n);
+            if (n.email) await sendEmailNotification(course, sub.email);
+          } catch (err) {
+            console.error(
+              `[NOTIFY] Delivery failed for uid ${sub.uid}:`,
+              err.message,
+            );
+          }
 
           stateMap.set(stateKey, { wasFull: false, notifiedOpen: true });
         } else if (nowFull) {

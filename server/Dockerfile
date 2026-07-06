@@ -8,11 +8,15 @@ WORKDIR /usr/src/app
 # We copy package.json and package-lock.json first to leverage Docker cache
 COPY package*.json ./
 
-# Install only production dependencies (skips nodemon)
-RUN npm install --omit=dev
+# Reproducible production-only install from the lockfile (skips nodemon)
+RUN npm ci --omit=dev
 
-# Bundle app source
+# Bundle app source (secrets excluded via .dockerignore)
 COPY . .
+
+# Drop root privileges — the app only needs to bind a port and make
+# outbound requests.
+USER node
 
 # Your app binds to 3000 by default (per your code)
 EXPOSE 3000

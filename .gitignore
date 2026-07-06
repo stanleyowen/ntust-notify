@@ -3,3 +3,4 @@
 node_modules/
 **/.DS_Store
 server/service-account.json
+client/dist/
