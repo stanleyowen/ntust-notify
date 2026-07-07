@@ -43,6 +43,30 @@ let semestersCache = { data: null, fetchedAt: 0 };
  */
 const SEMESTERS_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * Maximum number of NTUST course fetches the poll loop runs concurrently.
+ *
+ * The poll loop fans out one request per distinct watched course. A bounded
+ * pool keeps the whole cycle fast (wall-clock ≈ courses / concurrency × RTT)
+ * without opening hundreds of simultaneous connections to NTUST, which would
+ * risk rate-limiting or socket exhaustion. Tune via POLL_FETCH_CONCURRENCY.
+ *
+ * @type {number}
+ */
+const POLL_FETCH_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.POLL_FETCH_CONCURRENCY ?? "8", 10) || 8,
+);
+
+/**
+ * How long an unused NTUST course cache / fetch-stats entry is retained before
+ * the periodic sweep evicts it. Any actively watched course is re-fetched well
+ * within this window, so only genuinely abandoned courses are dropped.
+ *
+ * @type {number}
+ */
+const COURSE_CACHE_RETENTION_MS = 60 * 60 * 1000;
+
 // ─── Auth emails & poll intervals ────────────────────────────────────────────
 // AUTH_EMAILS: comma-separated list of email addresses that may poll as fast as
 // 1 s. All other users are capped at a 30 s minimum.
@@ -1028,6 +1052,18 @@ function setupWatchedCoursesListener(uid) {
           const d = doc.data();
           courses.set(d.CourseNo, d);
         });
+        // Drop per-(uid, course) notification state for any course the user
+        // has just unwatched, so stateMap doesn't grow without bound. This
+        // also clears stale wasFull/notifiedOpen state, so re-watching a
+        // course later starts from a clean slate.
+        const prevCourses = watchedCoursesData.get(uid);
+        if (prevCourses) {
+          for (const courseNo of prevCourses.keys()) {
+            if (!courses.has(courseNo)) {
+              stateMap.delete(`${uid}::${courseNo}`);
+            }
+          }
+        }
         watchedCoursesData.set(uid, courses);
       },
       (err) =>
@@ -1057,6 +1093,15 @@ function setupFirestoreListeners() {
       snap.docChanges().forEach((change) => {
         const uid = change.doc.id;
         if (change.type === "removed") {
+          // Clear every per-user map before dropping the course list, or
+          // stateMap/userLastPolled would leak entries for deleted users.
+          const courses = watchedCoursesData.get(uid);
+          if (courses) {
+            for (const courseNo of courses.keys()) {
+              stateMap.delete(`${uid}::${courseNo}`);
+            }
+          }
+          userLastPolled.delete(uid);
           usersData.delete(uid);
           watchedCoursesData.delete(uid);
           const unsub = watchListeners.get(uid);
@@ -1076,6 +1121,202 @@ function setupFirestoreListeners() {
     },
     (err) => console.error("[FIRESTORE] users listener error:", err.message),
   );
+}
+
+/**
+ * Runs an array of items through an async worker with bounded concurrency.
+ *
+ * Several lightweight workers pull from a shared queue until it drains, so at
+ * most `concurrency` calls are in flight at once. Each item is processed
+ * exactly once; a worker that throws would reject the whole run, so the worker
+ * passed in must handle its own errors.
+ *
+ * @template T
+ * @param {T[]} items - Items to process.
+ * @param {number} concurrency - Maximum concurrent workers.
+ * @param {(item: T) => Promise<void>} worker - Async processor for one item.
+ * @returns {Promise<void>}
+ */
+async function runPool(items, concurrency, worker) {
+  const queue = items.slice();
+  const runners = Array.from(
+    { length: Math.min(concurrency, queue.length) },
+    async () => {
+      while (queue.length > 0) {
+        await worker(queue.shift());
+      }
+    },
+  );
+  await Promise.all(runners);
+}
+
+/**
+ * Fetches one course from NTUST (or reuses fresh cache) and delivers alerts to
+ * its subscribers. Designed to run concurrently for distinct courses: each call
+ * touches only its own cache key and its subscribers' distinct state keys, so
+ * concurrent calls never contend on the same map entry.
+ *
+ * All errors are handled internally so this is safe to hand to runPool.
+ *
+ * @param {string} key - Cache key, `${semester}::${courseNo}`.
+ * @param {{ Semester: string, CourseNo: string, subscribers: Array<{uid: string, email: string, notify: Record<string, any>}>, maxAgeMs: number }} entry - Course entry built by the poll loop.
+ * @returns {Promise<void>}
+ */
+async function processCourse(key, entry) {
+  const cached = courseCache.get(key);
+  const now = Date.now();
+  let course;
+  let isStale = false;
+
+  if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
+    course = cached.course;
+  } else {
+    try {
+      const res = await axios.post(
+        NTUST_API,
+        {
+          Semester: entry.Semester,
+          CourseNo: entry.CourseNo,
+          CourseName: "",
+          CourseTeacher: "",
+          Dimension: "",
+          CourseNotes: "",
+          ForeignLanguage: 0,
+          OnlyGeneral: 0,
+          OnleyNTUST: 0,
+          OnlyUnderGraduate: 0,
+          OnlyMaster: 0,
+          Language: "zh",
+          CampusNotes: "undefined",
+        },
+        { headers: { "Content-Type": "application/json" }, timeout: 15000 },
+      );
+
+      const courses = Array.isArray(res.data) ? res.data : [];
+      course = courses.find((c) => c.CourseNo === entry.CourseNo) ?? null;
+      if (course) courseCache.set(key, { course, fetchedAt: now });
+
+      const prev = fetchStats.get(key) ?? {
+        totalFetches: 0,
+        consecutiveFailures: 0,
+      };
+      fetchStats.set(key, {
+        ...prev,
+        lastSuccessAt: now,
+        lastError: null,
+        lastErrorAt: prev.lastErrorAt ?? null,
+        consecutiveFailures: 0,
+        totalFetches: prev.totalFetches + 1,
+      });
+    } catch (err) {
+      console.error(`[NOTIFY] Failed to fetch ${entry.CourseNo}:`, err.message);
+
+      const prev = fetchStats.get(key) ?? {
+        totalFetches: 0,
+        consecutiveFailures: 0,
+      };
+      fetchStats.set(key, {
+        ...prev,
+        lastError: err.message,
+        lastErrorAt: now,
+        lastSuccessAt: prev.lastSuccessAt ?? null,
+        consecutiveFailures: (prev.consecutiveFailures ?? 0) + 1,
+        totalFetches: prev.totalFetches + 1,
+      });
+
+      // Fall back to stale cache so we keep the last known course record, but
+      // avoid making state-transition decisions based on outdated data.
+      course = cached?.course ?? null;
+      isStale = true;
+    }
+  }
+
+  if (!course) return;
+
+  // If stale data is being used, preserve the previous notification state.
+  if (isStale) return;
+
+  const nowFull = isFull(course);
+
+  // Notify each subscriber independently — sends run concurrently so one slow
+  // SMTP/webhook doesn't hold up the others or the rest of the poll cycle.
+  await Promise.all(
+    entry.subscribers.map(async (sub) => {
+      const stateKey = `${sub.uid}::${entry.CourseNo}`;
+      const prev = stateMap.get(stateKey);
+
+      if (isFirstNotifyRun) {
+        // Seed initial state without sending alerts.
+        stateMap.set(stateKey, { wasFull: nowFull, notifiedOpen: !nowFull });
+        return;
+      }
+
+      if (!nowFull && prev?.wasFull && !prev?.notifiedOpen) {
+        console.log(
+          `[NOTIFY] Slot opened for ${entry.CourseNo} — notifying uid ${sub.uid}`,
+        );
+
+        // One subscriber's bad webhook or SMTP hiccup must not abort delivery
+        // to the others.
+        const n = sub.notify;
+        try {
+          if (n.discord) await sendDiscordNotification(course, n);
+          if (n.email) await sendEmailNotification(course, sub.email);
+        } catch (err) {
+          console.error(
+            `[NOTIFY] Delivery failed for uid ${sub.uid}:`,
+            err.message,
+          );
+        }
+
+        stateMap.set(stateKey, { wasFull: false, notifiedOpen: true });
+      } else if (nowFull) {
+        // Reset the flag so the next reopen triggers a fresh alert.
+        stateMap.set(stateKey, { wasFull: true, notifiedOpen: false });
+      } else {
+        stateMap.set(stateKey, {
+          wasFull: false,
+          notifiedOpen: prev?.notifiedOpen ?? false,
+        });
+      }
+    }),
+  );
+}
+
+/**
+ * Evicts NTUST course cache and fetch-stats entries that have not been touched
+ * within COURSE_CACHE_RETENTION_MS. An actively watched course is re-fetched
+ * far more often than the retention window, so only abandoned courses are
+ * dropped; a later cache miss simply re-fetches, which is always correct.
+ *
+ * @returns {void}
+ */
+function sweepStaleCaches() {
+  const now = Date.now();
+  let evicted = 0;
+
+  for (const [key, cached] of courseCache) {
+    if (now - cached.fetchedAt > COURSE_CACHE_RETENTION_MS) {
+      courseCache.delete(key);
+      fetchStats.delete(key);
+      evicted++;
+    }
+  }
+
+  // Fetch-stats for courses that never cached (every fetch failed) won't be
+  // caught above, so drop those once they too go quiet.
+  for (const [key, stats] of fetchStats) {
+    if (courseCache.has(key)) continue;
+    const last = Math.max(stats.lastSuccessAt ?? 0, stats.lastErrorAt ?? 0);
+    if (now - last > COURSE_CACHE_RETENTION_MS) {
+      fetchStats.delete(key);
+      evicted++;
+    }
+  }
+
+  if (evicted > 0) {
+    console.log(`[NOTIFY] Swept ${evicted} stale cache entr${evicted === 1 ? "y" : "ies"}.`);
+  }
 }
 
 /**
@@ -1147,135 +1388,15 @@ async function pollNotifications() {
 
     if (courseMap.size === 0) return;
 
-    // For each unique course, fetch live data from NTUST or reuse fresh cache.
-    for (const [key, entry] of courseMap) {
-      const cached = courseCache.get(key);
-      const now = Date.now();
-      let course;
-      let isStale = false;
-
-      if (cached && now - cached.fetchedAt < entry.maxAgeMs) {
-        course = cached.course;
-        console.log(
-          `[NOTIFY] Cache hit for ${entry.CourseNo} (${Math.round((now - cached.fetchedAt) / 1000)}s old, max ${Math.round(entry.maxAgeMs / 1000)}s)`,
-        );
-      } else {
-        try {
-          const res = await axios.post(
-            NTUST_API,
-            {
-              Semester: entry.Semester,
-              CourseNo: entry.CourseNo,
-              CourseName: "",
-              CourseTeacher: "",
-              Dimension: "",
-              CourseNotes: "",
-              ForeignLanguage: 0,
-              OnlyGeneral: 0,
-              OnleyNTUST: 0,
-              OnlyUnderGraduate: 0,
-              OnlyMaster: 0,
-              Language: "zh",
-              CampusNotes: "undefined",
-            },
-            { headers: { "Content-Type": "application/json" }, timeout: 15000 },
-          );
-
-          const courses = Array.isArray(res.data) ? res.data : [];
-          course = courses.find((c) => c.CourseNo === entry.CourseNo) ?? null;
-          if (course) courseCache.set(key, { course, fetchedAt: now });
-
-          const prev = fetchStats.get(key) ?? {
-            totalFetches: 0,
-            consecutiveFailures: 0,
-          };
-          fetchStats.set(key, {
-            ...prev,
-            lastSuccessAt: now,
-            lastError: null,
-            lastErrorAt: prev.lastErrorAt ?? null,
-            consecutiveFailures: 0,
-            totalFetches: prev.totalFetches + 1,
-          });
-        } catch (err) {
-          console.error(
-            `[NOTIFY] Failed to fetch ${entry.CourseNo}:`,
-            err.message,
-          );
-
-          const prev = fetchStats.get(key) ?? {
-            totalFetches: 0,
-            consecutiveFailures: 0,
-          };
-          fetchStats.set(key, {
-            ...prev,
-            lastError: err.message,
-            lastErrorAt: now,
-            lastSuccessAt: prev.lastSuccessAt ?? null,
-            consecutiveFailures: (prev.consecutiveFailures ?? 0) + 1,
-            totalFetches: prev.totalFetches + 1,
-          });
-
-          // Fall back to stale cache so we keep the last known course record,
-          // but avoid making state-transition decisions based on outdated data.
-          course = cached?.course ?? null;
-          isStale = true;
-        }
-      }
-
-      if (!course) continue;
-
-      // If stale data is being used, preserve the previous notification state.
-      if (isStale) {
-        console.log(
-          `[NOTIFY] Skipping state update for ${entry.CourseNo} — using stale data`,
-        );
-        continue;
-      }
-
-      const nowFull = isFull(course);
-
-      // Notify each subscriber independently if a slot just opened.
-      for (const sub of entry.subscribers) {
-        const stateKey = `${sub.uid}::${entry.CourseNo}`;
-        const prev = stateMap.get(stateKey);
-
-        if (isFirstNotifyRun) {
-          // Seed initial state without sending alerts.
-          stateMap.set(stateKey, { wasFull: nowFull, notifiedOpen: !nowFull });
-          continue;
-        }
-
-        if (!nowFull && prev?.wasFull && !prev?.notifiedOpen) {
-          console.log(
-            `[NOTIFY] Slot opened for ${entry.CourseNo} — notifying uid ${sub.uid}`,
-          );
-
-          // One subscriber's bad webhook or SMTP hiccup must not abort the
-          // rest of the poll cycle.
-          const n = sub.notify;
-          try {
-            if (n.discord) await sendDiscordNotification(course, n);
-            if (n.email) await sendEmailNotification(course, sub.email);
-          } catch (err) {
-            console.error(
-              `[NOTIFY] Delivery failed for uid ${sub.uid}:`,
-              err.message,
-            );
-          }
-
-          stateMap.set(stateKey, { wasFull: false, notifiedOpen: true });
-        } else if (nowFull) {
-          // Reset the notification flag so the next reopen triggers a new alert.
-          stateMap.set(stateKey, { wasFull: true, notifiedOpen: false });
-        } else {
-          stateMap.set(stateKey, {
-            wasFull: false,
-            notifiedOpen: prev?.notifiedOpen ?? false,
-          });
-        }
-      }
-    }
+    // Fetch every distinct course and deliver its alerts, with bounded
+    // concurrency so the cycle's wall-clock scales as courses / concurrency
+    // instead of linearly. Each course owns disjoint cache/state keys, so
+    // concurrent workers never race. processCourse handles its own errors.
+    await runPool(
+      [...courseMap.entries()],
+      POLL_FETCH_CONCURRENCY,
+      ([key, entry]) => processCourse(key, entry),
+    );
 
     if (isFirstNotifyRun) {
       isFirstNotifyRun = false;
@@ -1303,6 +1424,10 @@ app.listen(PORT, () => {
     );
 
     setupFirestoreListeners();
+
+    // Periodically evict abandoned NTUST cache / fetch-stats entries so those
+    // maps don't grow unbounded over long uptimes.
+    setInterval(sweepStaleCaches, 10 * 60 * 1000).unref();
 
     /**
      * Schedules the next polling cycle after the current cycle has completed.
