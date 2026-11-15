@@ -1,10 +1,7 @@
-# Never bake secrets into image layers — they're provided at runtime via
-# env_file and the docker-compose volume mount instead.
-.env
-service-account.json
-
-node_modules
-npm-debug.log
-yarn-error.log
-.git
-.DS_Store
+# Allow-list: only what the image needs. Everything else (secrets, .env,
+# service-account.json, tests, git metadata) is excluded by default.
+*
+!package.json
+!package-lock.json
+!index.js
+!src/

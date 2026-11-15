@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// NTUST Notify — Firestore security rules.
+//
+// The browser never talks to Firestore directly. All reads and writes go
+// through the API server, which uses the Admin SDK (Admin SDK access bypasses
+// these rules) and validates every input.
+//
+// Denying all client access means a leaked or abused Firebase web config can
+// never be used to read another user's watchlist, rewrite someone's alert
+// email, or plant data the server would act on.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

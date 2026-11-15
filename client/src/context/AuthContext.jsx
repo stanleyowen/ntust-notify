@@ -1,101 +1,63 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  signInWithPopup,
-  signOut as firebaseSignOut,
   onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut as firebaseSignOut,
 } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, googleProvider, db } from "../firebase";
+import { auth, googleProvider } from "../firebase";
 
 /**
- * React context used to expose authentication state and auth actions to the
- * rest of the application.
- *
- * @type {import("react").Context<{
+ * @typedef {{
  *   user: import("firebase/auth").User | null | undefined,
- *   signInWithGoogle: () => Promise<void>,
+ *   signIn: () => Promise<void>,
  *   signOut: () => Promise<void>,
- * } | null>}
+ * }} AuthValue
  */
-const AuthContext = createContext(null);
+
+const AuthContext = createContext(/** @type {AuthValue | null} */ (null));
+
+/** Errors that just mean "the user changed their mind" — not worth showing. */
+const SILENT_ERRORS = new Set(["auth/popup-closed-by-user", "auth/cancelled-popup-request", "auth/user-cancelled"]);
 
 /**
- * Authentication provider that wraps the application.
+ * Provides Firebase auth state. `user` is undefined while Firebase restores
+ * the session, null when signed out.
  *
- * This component keeps track of Firebase auth state and exposes the current
- * user plus sign-in/sign-out helpers through React context.
- *
- * @param {{ children: import("react").ReactNode }} props - Component props.
- * @returns {JSX.Element}
+ * @param {{ children: import("react").ReactNode }} props
  */
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(undefined); // undefined = loading, null = signed out
+  const [user, setUser] = useState(/** @type {AuthValue["user"]} */ (undefined));
 
-  /**
-   * Subscribes to Firebase auth state changes and keeps the local user state in
-   * sync with the current session.
-   *
-   * @returns {() => void}
-   */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser ?? null);
-    });
-    return unsub;
+    // Completes a redirect sign-in (the fallback when popups are blocked).
+    getRedirectResult(auth).catch(() => {});
+    return onAuthStateChanged(auth, (u) => setUser(u ?? null));
   }, []);
 
-  /**
-   * Starts a Google popup sign-in flow and upserts the user's profile document
-   * in Firestore after successful authentication.
-   *
-   * @returns {Promise<void>}
-   */
-  async function signInWithGoogle() {
-    const result = await signInWithPopup(auth, googleProvider);
-    const u = result.user;
+  const signIn = useCallback(async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      const code = /** @type {{ code?: string }} */ (err)?.code ?? "";
+      if (SILENT_ERRORS.has(code)) return;
+      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
+      throw err;
+    }
+  }, []);
 
-    // Upsert user document in Firestore.
-    await setDoc(
-      doc(db, "users", u.uid),
-      {
-        uid: u.uid,
-        email: u.email,
-        displayName: u.displayName,
-        photoURL: u.photoURL,
-        lastLogin: serverTimestamp(),
-      },
-      { merge: true }, // preserve existing fields like createdAt
-    );
-  }
+  const signOut = useCallback(() => firebaseSignOut(auth), []);
 
-  /**
-   * Signs the current user out of Firebase Authentication.
-   *
-   * @returns {Promise<void>}
-   */
-  async function signOut() {
-    await firebaseSignOut(auth);
-  }
-
-  return (
-    <AuthContext.Provider value={{ user, signInWithGoogle, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const value = useMemo(() => ({ user, signIn, signOut }), [user, signIn, signOut]);
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/** @returns {AuthValue} */
 // eslint-disable-next-line react-refresh/only-export-components
-/**
- * Returns the current authentication context.
- *
- * This hook must only be used inside the AuthProvider tree.
- *
- * @returns {{
- *   user: import("firebase/auth").User | null | undefined,
- *   signInWithGoogle: () => Promise<void>,
- *   signOut: () => Promise<void>,
- * }}
- */
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");

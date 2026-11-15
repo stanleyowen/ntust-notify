@@ -1,25 +1,30 @@
-# Use the slim, secure Alpine-based Node image
-FROM node:20-alpine
+# syntax=docker/dockerfile:1
 
-# Create app directory
-WORKDIR /usr/src/app
+# ── Dependencies (production only, reproducible from the lockfile) ──────────
+FROM node:24-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-# Install app dependencies
-# We copy package.json and package-lock.json first to leverage Docker cache
-COPY package*.json ./
+# ── Runtime ─────────────────────────────────────────────────────────────────
+FROM node:24-alpine
+ENV NODE_ENV=production \
+    PORT=3000
+WORKDIR /app
 
-# Reproducible production-only install from the lockfile (skips nodemon)
-RUN npm ci --omit=dev
+# Root-owned, read-only app files; the process runs as the unprivileged
+# `node` user and cannot modify its own code. Explicit modes so restrictive
+# host permissions (e.g. 600) don't leave the files unreadable to `node`.
+COPY --from=deps /app/node_modules ./node_modules
+COPY --chmod=0444 package.json index.js ./
+COPY --chmod=0555 src ./src
 
-# Bundle app source (secrets excluded via .dockerignore)
-COPY . .
-
-# Drop root privileges — the app only needs to bind a port and make
-# outbound requests.
 USER node
-
-# Your app binds to 3000 by default (per your code)
 EXPOSE 3000
 
-# Run the app
-CMD [ "npm", "start" ]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+# Run node directly (not via npm) so SIGTERM reaches the app for a graceful
+# shutdown.
+CMD ["node", "index.js"]
