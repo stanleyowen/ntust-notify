@@ -32,7 +32,8 @@ The browser uses Firebase **only for Google sign-in**. Every read and write goes
 | Concern | How it's handled |
 | --- | --- |
 | Data access | Firestore is server-only (`allow read, write: if false`). Users can only reach their own data through authenticated routes. |
-| Identity | Every API call verifies a Firebase ID token and requires a verified Google email. The alert email and the fast-poll privilege come from the **Auth record**, never from editable document fields. |
+| Identity | Every API call verifies a Firebase ID token and requires a verified Google email. Sign-in and account deletion also check revocation (disabled/deleted accounts), and a deleted account's leftover tokens are refused. The alert email and the fast-poll privilege come from the **Auth record**, never from editable document fields. |
+| Network | The API listens on `127.0.0.1` by default (`HOST`), so it's reachable only through the local reverse proxy / tunnel and `X-Forwarded-For` can't be forged by direct clients. |
 | Input | All bodies, params and stored values are validated or normalized (`server/src/validate.js`). Course metadata is fetched from NTUST server-side, never taken from the client. |
 | SSRF | Discord webhooks must be `https://discord.com/api/webhooks/{id}/{token}` (strict host and path, no credentials, ports or redirects). |
 | Abuse | Per-user rate limits on every authenticated route, a generous per-IP flood limit (campus NAT friendly), capped watchlist size, 8 KB body limit. |
@@ -92,10 +93,10 @@ npm run dev                 # node --watch
 npm test                    # 30 tests
 ```
 
-### Frontend (yarn)
+### Frontend (yarn, Node ≥ 24.12)
 
 ```bash
-cd client
+cd client                   # .nvmrc pins Node 24 (also used by Netlify)
 cp .env.example .env        # VITE_API_URL=http://localhost:3000 for local dev
 yarn
 yarn dev                    # http://localhost:3001
@@ -109,7 +110,7 @@ cd server
 docker compose up --build -d
 ```
 
-`docker-compose.yaml` mounts `./service-account.json` read-only at `/run/secrets/` and sets `GOOGLE_APPLICATION_CREDENTIALS` for you. If a reverse proxy runs on the same host, set `BIND_ADDR=127.0.0.1` in `.env`.
+`docker-compose.yaml` mounts `./service-account.json` read-only at `/run/secrets/` and sets `GOOGLE_APPLICATION_CREDENTIALS` for you. The port is published on `127.0.0.1` by default (reachable only through a reverse proxy on the same host); set `BIND_ADDR=0.0.0.0` in `.env` only if clients must connect directly.
 
 ---
 

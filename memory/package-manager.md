@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-The `client/` workspace tracks BOTH `package-lock.json` and `yarn.lock` in git, but **yarn is the active manager** (yarn.lock is updated more recently; `yarn add` works and warns about the stray npm lockfile).
+The `client/` workspace uses **yarn** and tracks only `yarn.lock` (the stray npm `package-lock.json` was removed). It needs Node ≥ 24.12; `client/.nvmrc` pins 24.
 
 **Why:** Mixing managers causes resolution drift; picking the wrong one rewrites the wrong lockfile.
 
