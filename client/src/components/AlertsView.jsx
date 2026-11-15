@@ -127,7 +127,7 @@ export function AlertsView() {
   const hookErr = fieldError("discordWebhook");
   const idErr = fieldError("discordUserId");
   const savedHasChannel = prefs.email || prefs.discord;
-  const alertsOn = courses.filter((c) => c.notifyEnabled).length;
+  const alertsOn = courses.filter((c) => c.alerts.on).length;
 
   return (
     <div className="view view-narrow">

@@ -126,6 +126,26 @@ export function formatSchedule(node, t) {
  */
 export const looksLikeCourseNo = (s) => /^[A-Za-z]{2,3}\d[\dA-Za-z]*$/.test(s.trim());
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Alert countdown for a watched course. Alerts are live only while switched
+ * on AND before their expiry; legacy trackers without an expiry count as ended.
+ *
+ * @param {{ notifyEnabled?: boolean, alertsExpireAt?: number | null }} c
+ * @param {number} [now]
+ */
+export function alertStatus(c, now = Date.now()) {
+  const exp = typeof c.alertsExpireAt === "number" ? c.alertsExpireAt : null;
+  const on = Boolean(c.notifyEnabled) && exp != null && exp > now;
+  return {
+    on,
+    daysLeft: on ? Math.max(1, Math.ceil((exp - now) / DAY_MS)) : 0,
+    ended: !on && exp != null && exp <= now,
+    endedAt: exp,
+  };
+}
+
 /** NTUST's public course query (details) and course selection (register) sites. */
 export const NTUST_QUERY_URL = "https://querycourse.ntust.edu.tw/";
 export const NTUST_REGISTER_URL = "https://courseselection.ntust.edu.tw/";

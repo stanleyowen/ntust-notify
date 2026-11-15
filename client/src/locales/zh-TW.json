@@ -44,7 +44,7 @@
     "step1Title": "找到課程",
     "step1Body": "以課號、課名或教師搜尋，即時查看剩餘名額。",
     "step2Title": "加入關注",
-    "step2Body": "把額滿的課加入關注清單，通知會自動開啟。",
+    "step2Body": "把額滿的課加入關注清單，通知會自動開啟 30 天。",
     "step3Title": "收到通知",
     "step3Body": "伺服器 24 小時檢查選課系統，一有人退選就立刻寄信或在 Discord 提醒你。"
   },
@@ -136,7 +136,11 @@
     "removeLabel": "從關注清單移除 {{name}}",
     "emptyTitle": "你還沒有關注任何課程",
     "emptyBody": "搜尋課程並點選「關注」，我們會全天候幫你檢查，一有空位就立刻通知你。",
-    "emptyCta": "搜尋課程"
+    "emptyCta": "搜尋課程",
+    "alertsEndIn_one": "通知開啟中 · {{count}} 天後結束",
+    "alertsEndIn_other": "通知開啟中 · {{count}} 天後結束",
+    "extend": "延長至 {{days}} 天",
+    "alertsEnded": "通知已於 {{date}} 結束 —— 開啟後可再通知 {{days}} 天。"
   },
   "banner": {
     "noChannelTitle": "通知無法送達",
@@ -217,14 +221,15 @@
     "stateOpen": "有名額"
   },
   "toast": {
-    "watched": "已關注 {{name}}，通知已開啟",
+    "watched": "已關注 {{name}}，通知開啟 {{days}} 天",
     "removed": "已移除 {{name}}",
     "undo": "復原",
     "emailOn": "已開啟 Email 通知",
     "saved": "通知設定已儲存",
     "noChannel": "尚未設定通知管道。",
     "useEmail": "使用 Email",
-    "setup": "前往設定"
+    "setup": "前往設定",
+    "extended": "通知已延長 {{days}} 天"
   },
   "errors": {
     "generic": "發生錯誤，請再試一次。",

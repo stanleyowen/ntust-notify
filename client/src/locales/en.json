@@ -44,7 +44,7 @@
     "step1Title": "Find your course",
     "step1Body": "Search by course number, name, or teacher and see live seat counts.",
     "step2Title": "Watch it",
-    "step2Body": "Add full courses to your watchlist. Alerts turn on automatically.",
+    "step2Body": "Add full courses to your watchlist. Alerts turn on automatically for 30 days.",
     "step3Title": "Get alerted",
     "step3Body": "We check NTUST 24/7 and email or ping you on Discord the moment someone drops."
   },
@@ -136,7 +136,11 @@
     "removeLabel": "Remove {{name}} from watchlist",
     "emptyTitle": "You're not watching any courses",
     "emptyBody": "Search for a course and tap Watch. We'll check it around the clock and alert you the moment a seat opens.",
-    "emptyCta": "Find a course"
+    "emptyCta": "Find a course",
+    "alertsEndIn_one": "Alerts on · end in {{count}} day",
+    "alertsEndIn_other": "Alerts on · end in {{count}} days",
+    "extend": "Extend to {{days}} days",
+    "alertsEnded": "Alerts ended {{date}} — switch on for another {{days}} days."
   },
   "banner": {
     "noChannelTitle": "Your alerts have nowhere to go",
@@ -217,14 +221,15 @@
     "stateOpen": "open"
   },
   "toast": {
-    "watched": "Watching {{name}} — alerts are on",
+    "watched": "Watching {{name}} — alerts on for {{days}} days",
     "removed": "Removed {{name}}",
     "undo": "Undo",
     "emailOn": "Email alerts are on",
     "saved": "Alert settings saved",
     "noChannel": "Alerts can't reach you yet.",
     "useEmail": "Use email",
-    "setup": "Set up"
+    "setup": "Set up",
+    "extended": "Alerts extended for {{days}} days"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",

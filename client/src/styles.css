@@ -1483,6 +1483,29 @@ form + .section {
   align-items: center;
   gap: 7px;
 }
+.watch-card-timer {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  line-height: 1.4;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.watch-card-timer.is-soon {
+  color: var(--warn);
+}
+.watch-card-timer svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.watch-card-timer > span {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.watch-card-timer .link-btn {
+  font-size: 12.5px;
+  padding: 0 2px;
+}
 .watch-card-warn,
 .watch-card-note {
   display: flex;

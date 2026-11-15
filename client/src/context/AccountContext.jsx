@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, errorMessage } from "../lib/api";
+import { alertStatus } from "../lib/course";
 import { useToast } from "./ToastContext";
 import { useAuth } from "./AuthContext";
 
@@ -27,13 +28,15 @@ function useAccountState() {
   const [profile, setProfile] = useState(/** @type {{ uid: string, email: string, displayName: string, photoURL: string } | null} */ (null));
   const [prefs, setPrefs] = useState(/** @type {Prefs | null} */ (null));
   const [watchlist, setWatchlist] = useState(/** @type {WatchedCourse[]} */ ([]));
-  const [limits, setLimits] = useState({ maxWatched: 30, pollOptions: [30_000, 60_000, 180_000, 300_000, 600_000], privileged: false });
+  const [limits, setLimits] = useState({ maxWatched: 30, alertDurationDays: 30, pollOptions: [30_000, 60_000, 180_000, 300_000, 600_000], privileged: false });
   const [emailAvailable, setEmailAvailable] = useState(true);
   const [pending, setPending] = useState(() => new Set());
   const [live, setLive] = useState(() => ({ map: new Map(), updatedAt: /** @type {number | null} */ (null), loading: false }));
   const lastLoad = useRef(0);
   const watchlistRef = useRef(watchlist);
   watchlistRef.current = watchlist;
+  const limitsRef = useRef(limits);
+  limitsRef.current = limits;
 
   /** @param {any} data */
   const apply = useCallback((data) => {
@@ -96,7 +99,13 @@ function useAccountState() {
     async (course, { notifyEnabled = true, quiet = false } = {}) => {
       const courseNo = course.CourseNo;
       markPending(courseNo, true);
-      const optimistic = { ...course, notifyEnabled, addedAt: Date.now() };
+      const days = limitsRef.current.alertDurationDays;
+      const optimistic = {
+        ...course,
+        notifyEnabled,
+        alertsExpireAt: notifyEnabled ? Date.now() + days * 86_400_000 : null,
+        addedAt: Date.now(),
+      };
       setWatchlist((list) => (list.some((c) => c.CourseNo === courseNo) ? list : [...list, optimistic]));
       try {
         const { course: saved } = await api(`/api/watchlist/${encodeURIComponent(courseNo)}`, {
@@ -104,7 +113,7 @@ function useAccountState() {
           body: { semester: course.Semester, notifyEnabled },
         });
         setWatchlist((list) => list.map((c) => (c.CourseNo === courseNo ? saved : c)));
-        if (!quiet) toast(t("toast.watched", { name: course.CourseName || courseNo }), { tone: "success" });
+        if (!quiet) toast(t("toast.watched", { name: course.CourseName || courseNo, days }), { tone: "success" });
         return true;
       } catch (err) {
         setWatchlist((list) => list.filter((c) => c !== optimistic));
@@ -128,7 +137,7 @@ function useAccountState() {
         await api(`/api/watchlist/${encodeURIComponent(courseNo)}`, { method: "DELETE" });
         toast(t("toast.removed", { name: prev.CourseName || courseNo }), {
           action: prev.Semester
-            ? { label: t("toast.undo"), onClick: () => watch(prev, { notifyEnabled: prev.notifyEnabled, quiet: true }) }
+            ? { label: t("toast.undo"), onClick: () => watch(prev, { notifyEnabled: alertStatus(prev).on, quiet: true }) }
             : undefined,
         });
       } catch (err) {
@@ -141,16 +150,27 @@ function useAccountState() {
     [t, toast, watch],
   );
 
-  /** @param {string} courseNo @param {boolean} enabled */
+  /**
+   * Turns a course's alerts on/off. Turning on (or "extending" while on)
+   * restarts the server-side countdown.
+   *
+   * @param {string} courseNo
+   * @param {boolean} enabled
+   * @param {{ extend?: boolean }} [opts]
+   */
   const setAlerts = useCallback(
-    async (courseNo, enabled) => {
-      const setFlag = (v) =>
-        setWatchlist((list) => list.map((c) => (c.CourseNo === courseNo ? { ...c, notifyEnabled: v } : c)));
-      setFlag(enabled);
+    async (courseNo, enabled, { extend = false } = {}) => {
+      const prev = watchlistRef.current.find((c) => c.CourseNo === courseNo);
+      if (!prev) return;
+      const days = limitsRef.current.alertDurationDays;
+      const replace = (entry) => setWatchlist((list) => list.map((c) => (c.CourseNo === courseNo ? entry : c)));
+      replace(enabled ? { ...prev, notifyEnabled: true, alertsExpireAt: Date.now() + days * 86_400_000 } : { ...prev, notifyEnabled: false });
       try {
-        await api(`/api/watchlist/${encodeURIComponent(courseNo)}`, { method: "PATCH", body: { notifyEnabled: enabled } });
+        const { course } = await api(`/api/watchlist/${encodeURIComponent(courseNo)}`, { method: "PATCH", body: { notifyEnabled: enabled } });
+        replace(course);
+        if (extend) toast(t("toast.extended", { days }), { tone: "success" });
       } catch (err) {
-        setFlag(!enabled);
+        replace(prev);
         toast(errorMessage(err, t), { tone: "error" });
       }
     },
@@ -205,9 +225,10 @@ function useAccountState() {
     () =>
       watchlist.map((c) => {
         const l = live.map.get(c.CourseNo);
-        return l
+        const merged = l
           ? { ...c, ChooseStudent: l.ChooseStudent, Restrict1: l.Restrict1, ClassRoomNo: l.ClassRoomNo ?? c.ClassRoomNo, live: true, stale: l.stale }
           : c;
+        return { ...merged, alerts: alertStatus(merged) };
       }),
     [watchlist, live.map],
   );
