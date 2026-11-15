@@ -7,16 +7,18 @@ const { createMemoryStore, createFakeNtust, createFakeNotifier, silentLogger } =
 
 const HOOK = "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_ABC-123";
 
+const DAY = 24 * 60 * 60 * 1000;
+
 async function setup() {
   let t = 1_000_000;
-  const store = createMemoryStore();
+  const store = createMemoryStore({ now: () => t });
   const ntust = createFakeNtust();
   const notifier = createFakeNotifier();
   const poller = createPoller({ store, ntust, notifier, concurrency: 4, now: () => t, logger: silentLogger });
   await store.upsertSession({ uid: "u1", email: "alice@example.com", emailVerified: true, name: "", picture: "" });
   await store.savePrefs("u1", { email: true, discord: true, discordWebhook: HOOK, pollInterval: 30_000 });
   ntust.set("1151", { CourseNo: "CS3003301", CourseName: "DM", Restrict1: "80", ChooseStudent: 80 });
-  await store.putWatched("u1", { Semester: "1151", CourseNo: "CS3003301", CourseName: "DM" }, true);
+  await store.putWatched("u1", { Semester: "1151", CourseNo: "CS3003301", CourseName: "DM" }, true, t + 30 * DAY);
   return { store, ntust, notifier, poller, advance: (ms) => (t += ms) };
 }
 
@@ -89,4 +91,28 @@ test("unwatching clears per-course alert state", async () => {
   assert.ok(poller.stateFor("u1", "CS3003301"));
   await store.removeWatched("u1", "CS3003301");
   assert.equal(poller.stateFor("u1", "CS3003301"), null);
+});
+
+test("expired alerts are not polled and get switched off", async () => {
+  const { store, ntust, poller, advance } = await setup();
+  await poller.cycle();
+  const before = ntust.calls.length;
+  advance(31 * DAY);
+  await poller.cycle();
+  assert.equal(ntust.calls.length, before, "expired course not fetched");
+  assert.equal(await store.expireAlerts(), 1);
+  assert.equal(store.getWatched("u1", "CS3003301").notifyEnabled, false);
+});
+
+test("legacy trackers without an expiry are switched off", async () => {
+  const { store, ntust, poller } = await setup();
+  store._rawWatch("u1", { CourseNo: "CS3004301", Semester: "1151", notifyEnabled: true });
+  ntust.set("1151", { CourseNo: "CS3004301", Restrict1: "60", ChooseStudent: 60 });
+  await poller.cycle();
+  assert.ok(!ntust.calls.some((c) => c[2] === "CS3004301"), "legacy course not polled");
+  assert.equal(await store.expireAlerts(), 1);
+  const w = store.getWatched("u1", "CS3004301");
+  assert.equal(w.notifyEnabled, false);
+  assert.ok(w.alertsExpireAt, "expiry date recorded so the UI can say when it ended");
+  assert.equal(store.getWatched("u1", "CS3003301").notifyEnabled, true, "active tracker untouched");
 });

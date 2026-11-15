@@ -228,3 +228,17 @@ test("delete account wipes the user's data", async (t) => {
   assert.equal(store.getUser("alice"), null);
   assert.equal(store.listWatched("alice").length, 0);
 });
+
+test("alerts get a 30-day expiry; re-enabling renews it", async (t) => {
+  const { call, close } = await boot();
+  t.after(close);
+  await call("/api/session", { method: "POST", token: ALICE });
+  const DAY = 24 * 60 * 60 * 1000;
+  const r = await call("/api/watchlist/CS3003301", { method: "PUT", token: ALICE, body: { semester: "1151" } });
+  assert.ok(Math.abs(r.json.course.alertsExpireAt - (Date.now() + 30 * DAY)) < 5000);
+  const off = await call("/api/watchlist/CS3003301", { method: "PATCH", token: ALICE, body: { notifyEnabled: false } });
+  assert.equal(off.json.course.notifyEnabled, false);
+  const on = await call("/api/watchlist/CS3003301", { method: "PATCH", token: ALICE, body: { notifyEnabled: true } });
+  assert.ok(on.json.course.alertsExpireAt >= r.json.course.alertsExpireAt);
+  assert.equal((await call("/api/me", { token: ALICE })).json.limits.alertDurationDays, 30);
+});

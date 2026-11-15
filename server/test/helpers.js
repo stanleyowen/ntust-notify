@@ -2,14 +2,14 @@
 
 const { EventEmitter } = require("node:events");
 const { normalizePrefs } = require("../src/validate");
-const { normalizeWatched } = require("../src/store");
+const { normalizeWatched, alertsActive } = require("../src/store");
 
 /**
  * In-memory stand-in for createFirestoreStore with the same interface.
  *
  * @param {{ privilegedEmails?: Set<string> }} [opts]
  */
-function createMemoryStore({ privilegedEmails = new Set() } = {}) {
+function createMemoryStore({ privilegedEmails = new Set(), now = Date.now } = {}) {
   const events = new EventEmitter();
   const users = new Map();
   const watched = new Map();
@@ -44,17 +44,22 @@ function createMemoryStore({ privilegedEmails = new Set() } = {}) {
     savePrefs: async (uid, prefs) => {
       users.set(uid, { ...(users.get(uid) ?? { displayName: "", photoURL: "" }), prefs: normalizePrefs(prefs) });
     },
-    putWatched: async (uid, course, notifyEnabled) => {
+    putWatched: async (uid, course, notifyEnabled, expireAt) => {
       if (!watched.has(uid)) watched.set(uid, new Map());
       const prev = watched.get(uid).get(course.CourseNo);
-      const entry = normalizeWatched({ ...course, notifyEnabled, addedAt: prev?.addedAt ?? t++ });
+      const entry = normalizeWatched({
+        ...course,
+        notifyEnabled,
+        alertsExpireAt: notifyEnabled ? expireAt : (prev?.alertsExpireAt ?? null),
+        addedAt: prev?.addedAt ?? t++,
+      });
       watched.get(uid).set(entry.CourseNo, entry);
       return entry;
     },
-    setNotify: async (uid, courseNo, enabled) => {
+    setNotify: async (uid, courseNo, enabled, expireAt) => {
       const w = watched.get(uid)?.get(courseNo);
       if (!w) return null;
-      const entry = { ...w, notifyEnabled: enabled };
+      const entry = enabled ? { ...w, notifyEnabled: true, alertsExpireAt: expireAt } : { ...w, notifyEnabled: false };
       watched.get(uid).set(courseNo, entry);
       return entry;
     },
@@ -62,6 +67,25 @@ function createMemoryStore({ privilegedEmails = new Set() } = {}) {
       const ok = Boolean(watched.get(uid)?.delete(courseNo));
       if (ok) events.emit("unwatched", uid, courseNo);
       return ok;
+    },
+    expireAlerts: async () => {
+      let n = 0;
+      const t0 = now();
+      for (const courses of watched.values()) {
+        for (const w of courses.values()) {
+          if (w.notifyEnabled && !alertsActive(w, t0)) {
+            courses.set(w.CourseNo, { ...w, notifyEnabled: false, alertsExpireAt: w.alertsExpireAt ?? t0 });
+            n++;
+          }
+        }
+      }
+      return n;
+    },
+    // Test-only: insert a raw (e.g. legacy) watched doc.
+    _rawWatch: (uid, doc) => {
+      if (!watched.has(uid)) watched.set(uid, new Map());
+      const w = normalizeWatched(doc);
+      watched.get(uid).set(w.CourseNo, w);
     },
     deleteUser: async (uid) => {
       users.delete(uid);
