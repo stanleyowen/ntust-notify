@@ -1,334 +1,154 @@
 # NTUST Notify
 
-NTUST Notify is a full-stack course tracking app for monitoring NTUST course availability.
+Seat alerts for full NTUST courses. Search the catalogue, watch a course, and get an email or Discord message the moment a seat opens — the server checks around the clock.
 
-It helps users:
-
-- sign in with Google
-- search NTUST courses
-- save courses to a personal watchlist
-- enable notifications for selected courses
-- receive alerts when a full course becomes available again
-
-The project combines a React frontend, an Express backend, Firebase Authentication / Firestore, and email or Discord notifications.
+- **Search** by course number, name or teacher with live seat counts
+- **Watchlist** with live seats, per-course alert switches and a one-tap "Register now" when a seat is open
+- **Alerts** by email (your Google address) and/or Discord webhook, with a real delivery test and delivery diagnostics
+- English and 繁體中文, light and dark themes, mobile-first layout
+- Delete your account and data at any time
 
 ---
 
-## Features
-
-- Google sign-in with Firebase Authentication
-- course search via the NTUST course query API
-- personal watchlist stored in Firestore
-- per-course notification toggle
-- notification preferences for:
-  - Email
-  - Discord webhook
-- configurable polling interval
-- backend notification polling with:
-  - per-user interval enforcement
-  - course request deduplication
-  - in-memory cache
-  - stale-data protection
-- diagnostics endpoint for poller status and cache/fetch health
-
----
-
-## Tech Stack
-
-### Frontend
-- React
-- Vite
-- Firebase Web SDK
-
-### Backend
-- Node.js
-- Express
-- Axios
-- Firebase Admin SDK
-- Nodemailer
-- express-rate-limit
-- Helmet
-- CORS
-
-### Infrastructure / Deployment
-- Docker
-- Docker Compose
-- PM2
-
----
-
-## Project Structure
+## Architecture
 
 ```text
-client/
+Browser ──(Google sign-in)──► Firebase Auth
+   │
+   │  HTTPS + Firebase ID token
+   ▼
+API server (Express) ──► Firestore (Admin SDK, server-only)
+   │      ▲
+   │      └── in-memory mirror via onSnapshot (poll loop never reads Firestore)
+   ├──► NTUST course API (shared cache, in-flight de-dupe, keep-alive)
+   └──► SMTP / Discord webhooks
+```
+
+The browser uses Firebase **only for Google sign-in**. Every read and write goes through the API, which validates it; `firestore.rules` denies all direct client access.
+
+### Security model
+
+| Concern | How it's handled |
+| --- | --- |
+| Data access | Firestore is server-only (`allow read, write: if false`). Users can only reach their own data through authenticated routes. |
+| Identity | Every API call verifies a Firebase ID token and requires a verified Google email. The alert email and the fast-poll privilege come from the **Auth record**, never from editable document fields. |
+| Input | All bodies, params and stored values are validated or normalized (`server/src/validate.js`). Course metadata is fetched from NTUST server-side, never taken from the client. |
+| SSRF | Discord webhooks must be `https://discord.com/api/webhooks/{id}/{token}` (strict host and path, no credentials, ports or redirects). |
+| Abuse | Per-user rate limits on every authenticated route, a generous per-IP flood limit (campus NAT friendly), capped watchlist size, 8 KB body limit. |
+| Mentions | Discord `allowed_mentions` only ever pings the configured user. |
+| Errors | Central JSON error handler; no stack traces or upstream error text reach clients. |
+| Frontend | Strict CSP generated at build time from your env (`vite.config.js`), plus HSTS, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` and COOP. |
+| Container | Node 24 Alpine, non-root, read-only root filesystem, all capabilities dropped, `no-new-privileges`, healthcheck. Secrets are mounted read-only and never copied into the image. |
+
+### Performance
+
+- One NTUST client is shared by search, the watchlist and the poller. Search results warm the per-course cache, so watching a course you just found is instant.
+- Concurrent identical requests share a single upstream call. Connections are kept alive, so warm calls skip the TLS handshake.
+- NTUST responses are reduced to the fields the app uses and merged per course (NTUST returns one row per time/room block). That roughly halves the payload per course.
+- The watchlist's live seats come from one batched request served from cache, refreshed every minute while visible.
+- The client bundle is about 52% smaller than before (no Firestore SDK), and Firebase sits in its own long-cached chunk.
+
+---
+
+## Project structure
+
+```text
+client/                     React + Vite SPA
   src/
-    components/
-    context/
-    hooks/
-    App.jsx
-    firebase.js
-    main.jsx
-  public/
-  package.json
-  vite.config.js
-
+    context/                Auth, Account (data + optimistic mutations), Toasts
+    components/             Views (Search, Watchlist, Alerts) and UI pieces
+    lib/                    api client, course helpers, routing, theme
+    locales/                en, zh-TW
+    styles.css              design system (tokens → components)
+  vite.config.js            build + generated security headers
 server/
-  index.js
-  Dockerfile
-  docker-compose.yaml
-  package.json
-  .env.example
+  index.js                  process entry: wiring + graceful shutdown
+  src/
+    config.js               validated env config
+    validate.js             all input validation and normalization
+    ntust.js                NTUST client (cache, de-dupe, projection, merge)
+    store.js                Firestore gateway + real-time mirror
+    poller.js               FULL → OPEN detection and alert delivery
+    notifier.js             email + Discord senders
+    app.js                  Express routes, auth, rate limits, errors
+  test/                     node:test suites (no network or Firebase needed)
+firestore.rules             deny-all client rules
+firebase.json
 ```
 
 ---
 
-## How It Works
+## Setup
 
-### 1. Authentication
-Users sign in with Google through Firebase Authentication.
+### Backend (npm)
 
-After sign-in, the frontend creates or updates the user document in Firestore.
-
-### 2. Course Search
-The frontend sends search conditions to the backend.
-
-The backend proxies those requests to the NTUST course query API and returns the result to the frontend.
-
-### 3. Watchlist
-Users can add courses to their personal watchlist.
-
-Watched courses are stored in Firestore under:
-
-```text
-users/{uid}/watchedCourses/{courseNo}
+```bash
+cd server
+cp .env.example .env        # fill in values
+npm ci
+npm run dev                 # node --watch
+npm test                    # 30 tests
 ```
 
-### 4. Notifications
-Users can configure notification preferences such as:
-
-- email notifications
-- Discord webhook notifications
-- optional Discord user mention
-- polling interval
-
-Each watched course can also enable or disable notifications individually.
-
-### 5. Polling Logic
-The backend continuously checks watched courses and only sends an alert when a course changes from:
-
-```text
-FULL -> OPEN
-```
-
-This prevents duplicate alerts while still allowing a new notification if the course becomes full again and later reopens.
-
----
-
-## Backend Design Notes
-
-The backend includes several important design choices:
-
-- **Firebase token verification** for protected routes
-- **rate limiting** to prevent abuse
-- **CORS protection** for allowed frontend origins
-- **in-memory Firestore mirrors** using snapshot listeners
-- **request deduplication** so identical course checks are fetched only once
-- **course response caching** to reduce unnecessary upstream requests
-- **stale cache protection** so failed NTUST fetches do not incorrectly change notification state
-- **recursive polling scheduling** to avoid overlapping poll runs
-
----
-
-## Frontend Design Notes
-
-The frontend is built around a few core concepts:
-
-- `App.jsx` coordinates the authenticated application flow
-- `AuthContext` manages Firebase auth state
-- `useWatchedCourses` syncs the user watchlist from Firestore
-- `useNotifyPrefs` syncs notification preferences
-- `SearchForm` handles query input
-- `CourseTable` renders search results and watchlist data
-- `NotifyPrefsPanel` manages notification settings and diagnostics
-
----
-
-## Environment Setup
-
-### Frontend
-
-See `client/.env.example`.
-
-Example:
-
-```env
-VITE_API_URL=https://your-backend.example.com
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-```
-
-### Backend
-
-See `server/.env.example`.
-
-Example:
-
-```env
-PORT=3001
-ALLOWED_ORIGINS=https://your-frontend.example.com
-AUTH_EMAILS=you@example.com
-
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=you@gmail.com
-SMTP_PASS=your-app-password
-SMTP_FROM="NTUST Notify <you@gmail.com>"
-```
-
----
-
-## Local Development
-
-### Frontend
+### Frontend (yarn)
 
 ```bash
 cd client
-npm install
-npm run dev
+cp .env.example .env        # VITE_API_URL=http://localhost:3000 for local dev
+yarn
+yarn dev                    # http://localhost:3001
+yarn build
 ```
 
-### Backend
-
-```bash
-cd server
-npm install
-npm run dev
-```
-
----
-
-## Production Build
-
-### Frontend
-
-```bash
-cd client
-npm install
-npm run build
-```
-
-### Backend
-
-```bash
-cd server
-npm install
-npm start
-```
-
----
-
-## Backend Hosting
-
-The backend can be hosted in either of the following ways:
-
-### Option 1: PM2
-
-PM2 is suitable if you want to run the Express backend directly on a server without containerizing it.
-
-Example:
-
-```bash
-cd server
-npm install
-pm2 start index.js --name ntust-notify-backend
-```
-
-Useful PM2 commands:
-
-```bash
-pm2 status
-pm2 logs ntust-notify-backend
-pm2 restart ntust-notify-backend
-pm2 stop ntust-notify-backend
-```
-
-### Option 2: Docker Compose
-
-The backend also includes Docker support through `Dockerfile` and `docker-compose.yaml`.
-
-Example:
+### Docker
 
 ```bash
 cd server
 docker compose up --build -d
 ```
 
-Before starting the container, make sure the following are prepared:
-
-- `.env`
-- Firebase service account credentials
-- SMTP settings if email notification is required
+`docker-compose.yaml` mounts `./service-account.json` read-only at `/run/secrets/` and sets `GOOGLE_APPLICATION_CREDENTIALS` for you. If a reverse proxy runs on the same host, set `BIND_ADDR=127.0.0.1` in `.env`.
 
 ---
 
-## API Overview
+## Deploying this version (order matters)
 
-### `GET /health`
-Returns backend health status.
+1. **Backend first.** The new client needs the new API routes. The old client keeps working until step 3.
+2. **Frontend.** Make sure the Netlify build env has `VITE_API_URL` and the `VITE_FIREBASE_*` values: the CSP is generated from them.
+3. **Firestore rules.** Once the new frontend is live, deny all client access:
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+   (or paste `firestore.rules` into Firebase Console → Firestore → Rules).
 
-### `POST /api/courses`
-Searches NTUST courses through the backend proxy.
+Existing users and watchlists carry over unchanged (same Firestore schema).
 
-### `GET /api/poll-options`
-Returns available polling intervals for the current user.
-
-### `POST /api/notify/test`
-Sends a test notification using current user settings.
-
-### `GET /api/notify/status`
-Returns notification poller diagnostics and watched-course status.
+If the CSP blocks something in your environment, build with `VITE_CSP_REPORT_ONLY=true` to switch it to report-only while you investigate.
 
 ---
 
-## Notification Channels
+## API
 
-### Email
-Email notifications are sent using SMTP via Nodemailer.
+All `/api/*` routes except `/api/semesters` need `Authorization: Bearer <Firebase ID token>`. Errors are `{ "error": string, "code": string }`.
 
-### Discord
-Discord notifications are sent using a webhook and can optionally mention a user.
-
----
-
-## Security Notes
-
-- Firebase ID tokens are required for protected routes
-- CORS is restricted to configured origins
-- rate limiting is applied to reduce abuse
-- request body size is limited
-- security headers are enabled with Helmet
-
----
-
-## Future Improvements
-
-Potential future improvements include:
-
-- modularizing the backend into routes / services / poller modules
-- adding TypeScript
-- adding automated tests
-- supporting more notification platforms
-- separating the poller into an independent worker process
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Liveness + Firestore mirror state |
+| GET | `/api/semesters` | Semester list (cached 1 h) |
+| POST | `/api/courses` | Search `{ semester, courseNo \| courseName \| teacher }` |
+| POST | `/api/session` | Record sign-in; returns account bootstrap |
+| GET | `/api/me` | Account bootstrap (profile, prefs, watchlist, limits) |
+| PUT | `/api/me/prefs` | Save alert preferences |
+| DELETE | `/api/me` | Delete account and all data |
+| GET | `/api/watchlist/live` | Live seats for every watched course |
+| PUT | `/api/watchlist/:courseNo` | Watch `{ semester, notifyEnabled? }` |
+| PATCH | `/api/watchlist/:courseNo` | `{ notifyEnabled }` |
+| DELETE | `/api/watchlist/:courseNo` | Unwatch |
+| POST | `/api/notify/test` | Send a test alert (5 per 10 min) |
+| GET | `/api/notify/status` | Delivery diagnostics |
 
 ---
 
 ## License
 
-This project is licensed under the terms of the repository license.
+See [LICENSE](LICENSE). NTUST Notify is an independent project and is not affiliated with National Taiwan University of Science and Technology.
