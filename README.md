@@ -4,6 +4,7 @@ Seat alerts for full NTUST courses. Search the catalogue, watch a course, and ge
 
 - **Search** by course number, name or teacher with live seat counts
 - **Watchlist** with live seats, per-course alert switches and a one-tap "Register now" when a seat is open
+- **Auto-expiring alerts**: each course's alerts stay on for 30 days, then switch off to save server and NTUST load. Extend or re-enable with one tap.
 - **Alerts** by email (your Google address) and/or Discord webhook, with a real delivery test and delivery diagnostics
 - English and 繁體中文, light and dark themes, mobile-first layout
 - Delete your account and data at any time
@@ -45,6 +46,7 @@ The browser uses Firebase **only for Google sign-in**. Every read and write goes
 - One NTUST client is shared by search, the watchlist and the poller. Search results warm the per-course cache, so watching a course you just found is instant.
 - Concurrent identical requests share a single upstream call. Connections are kept alive, so warm calls skip the TLS handshake.
 - NTUST responses are reduced to the fields the app uses and merged per course (NTUST returns one row per time/room block). That roughly halves the payload per course.
+- Alerts expire 30 days after being turned on (`ALERT_DURATION_DAYS`). The poller skips expired courses immediately, and a sweep at startup and every 10 minutes persists the switch-off. Trackers created before expiry existed count as expired.
 - The watchlist's live seats come from one batched request served from cache, refreshed every minute while visible.
 - The client bundle is about 52% smaller than before (no Firestore SDK), and Firebase sits in its own long-cached chunk.
 

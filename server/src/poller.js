@@ -15,8 +15,10 @@
 const { NORMAL_MIN_INTERVAL_MS, PRIVILEGED_MIN_INTERVAL_MS } = require("./config");
 const { sanitizeInterval } = require("./validate");
 const { isFull, runPool } = require("./ntust");
+const { alertsActive } = require("./store");
 
 const TICK_MS = 1_000;
+const EXPIRY_SWEEP_MS = 10 * 60 * 1000;
 
 /**
  * @param {{
@@ -38,6 +40,17 @@ function createPoller({ store, ntust, notifier, concurrency, now = Date.now, log
   let stopped = false;
   /** @type {NodeJS.Timeout | null} */
   let timer = null;
+  /** @type {NodeJS.Timeout | null} */
+  let expiryTimer = null;
+
+  async function sweepExpired() {
+    try {
+      const n = await store.expireAlerts();
+      if (n > 0) logger.log(`[NOTIFY] Switched off ${n} expired alert(s).`);
+    } catch (err) {
+      logger.error(`[NOTIFY] expiry sweep failed: ${err.message}`);
+    }
+  }
 
   store.events.on("unwatched", (uid, courseNo) => state.delete(`${uid}::${courseNo}`));
   store.events.on("userRemoved", (uid) => lastPolled.delete(uid));
@@ -65,7 +78,7 @@ function createPoller({ store, ntust, notifier, concurrency, now = Date.now, log
     store.forEachUser((uid, user, courses) => {
       if (!user.prefs.email && !user.prefs.discord) return;
       const w = courses.get(courseNo);
-      if (!w || !w.notifyEnabled || w.Semester !== semester) return;
+      if (!w || !alertsActive(w, now()) || w.Semester !== semester) return;
       min = Math.min(min, effectiveInterval(uid, user.prefs));
     });
     return min === Infinity ? null : min;
@@ -144,7 +157,7 @@ function createPoller({ store, ntust, notifier, concurrency, now = Date.now, log
 
         let any = false;
         for (const w of courses.values()) {
-          if (!w.notifyEnabled || !w.Semester) continue;
+          if (!alertsActive(w, t) || !w.Semester) continue;
           any = true;
           const key = `${w.Semester}::${w.CourseNo}`;
           let entry = work.get(key);
@@ -186,6 +199,9 @@ function createPoller({ store, ntust, notifier, concurrency, now = Date.now, log
     async start() {
       await store.whenReady();
       if (stopped) return;
+      await sweepExpired();
+      expiryTimer = setInterval(sweepExpired, EXPIRY_SWEEP_MS);
+      expiryTimer.unref();
       await cycle();
       schedule();
       logger.log("[NOTIFY] Poller running.");
@@ -193,8 +209,10 @@ function createPoller({ store, ntust, notifier, concurrency, now = Date.now, log
     stop() {
       stopped = true;
       if (timer) clearTimeout(timer);
+      if (expiryTimer) clearInterval(expiryTimer);
     },
     cycle,
+    sweepExpired,
     isSeeded: () => seeded,
     effectiveInterval,
     sharedInterval,

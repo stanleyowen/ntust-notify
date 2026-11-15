@@ -115,6 +115,9 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
     next();
   }
 
+  /** When alerts turned on now should switch themselves off. */
+  const alertExpiry = () => Date.now() + config.alertDurationDays * 24 * 60 * 60 * 1000;
+
   /** Builds the bootstrap payload the client needs after sign-in. */
   function accountPayload(req) {
     const { uid, email, name, picture } = req.user;
@@ -126,6 +129,7 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
       watchlist: store.listWatched(uid),
       limits: {
         maxWatched: config.maxWatchedPerUser,
+        alertDurationDays: config.alertDurationDays,
         pollOptions: pollOptionsFor(privileged),
         privileged,
       },
@@ -219,7 +223,7 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
       if (error) throw new HttpError(502, "upstream_unavailable", "NTUST course system is not responding.");
       throw new HttpError(404, "course_not_found", "That course doesn't exist in this semester.");
     }
-    const entry = await store.putWatched(uid, course, notifyEnabled);
+    const entry = await store.putWatched(uid, course, notifyEnabled, notifyEnabled ? alertExpiry() : null);
     res.status(existing ? 200 : 201).json({ course: entry });
   });
 
@@ -227,7 +231,8 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
     const courseNo = parseCourseNo(req.params.courseNo);
     if (!courseNo) throw new HttpError(400, "invalid_course_no");
     if (typeof req.body?.notifyEnabled !== "boolean") throw new HttpError(400, "invalid_body");
-    const entry = await store.setNotify(req.user.uid, courseNo, req.body.notifyEnabled);
+    // Enabling (or re-enabling to "extend") restarts the countdown.
+    const entry = await store.setNotify(req.user.uid, courseNo, req.body.notifyEnabled, req.body.notifyEnabled ? alertExpiry() : null);
     if (!entry) throw new HttpError(404, "not_watched");
     res.json({ course: entry });
   });
@@ -292,6 +297,7 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
         courseNo: w.CourseNo,
         courseName: w.CourseName,
         notifyEnabled: w.notifyEnabled,
+        alertsExpireAt: w.alertsExpireAt,
         state: poller?.stateFor(uid, w.CourseNo) ?? null,
         sharedIntervalMs: poller && w.Semester ? poller.sharedInterval(w.Semester, w.CourseNo) : null,
         cache: info.cached

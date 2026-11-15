@@ -31,7 +31,7 @@ const READY_TIMEOUT_MS = 20_000;
  *   CourseNo: string, Semester: string | null, CourseName: string, CourseTeacher: string,
  *   Restrict1: string, ChooseStudent: number | null, CreditPoint: string,
  *   ClassRoomNo: string, Node: string, Contents: string,
- *   notifyEnabled: boolean, addedAt: number | null,
+ *   notifyEnabled: boolean, addedAt: number | null, alertsExpireAt: number | null,
  * }} WatchedCourse
  *
  * @typedef {{ prefs: ReturnType<typeof normalizePrefs>, displayName: string, photoURL: string }} UserRecord
@@ -68,7 +68,19 @@ function normalizeWatched(d) {
     Contents: str(d.Contents, 300),
     notifyEnabled: d.notifyEnabled === true,
     addedAt,
+    alertsExpireAt: Number.isFinite(Number(d.alertsExpireAt)) && d.alertsExpireAt !== null ? Number(d.alertsExpireAt) : null,
   };
+}
+
+/**
+ * Whether a watched course's alerts are actually live right now. Courses with
+ * no expiry (created before expiry existed) count as expired.
+ *
+ * @param {WatchedCourse} w
+ * @param {number} now
+ */
+function alertsActive(w, now) {
+  return w.notifyEnabled && w.alertsExpireAt != null && w.alertsExpireAt > now;
 }
 
 /**
@@ -339,9 +351,10 @@ function createFirestoreStore({ db, auth, FieldValue, privilegedEmails, now = Da
    * @param {string} uid
    * @param {Record<string, any>} course - Projected NTUST course record.
    * @param {boolean} notifyEnabled
+   * @param {number | null} expireAt - When alerts switch off (ms), if enabling.
    * @returns {Promise<WatchedCourse>}
    */
-  async function putWatched(uid, course, notifyEnabled) {
+  async function putWatched(uid, course, notifyEnabled, expireAt) {
     const existing = getWatched(uid, course.CourseNo);
     const doc = {
       CourseNo: course.CourseNo,
@@ -355,6 +368,7 @@ function createFirestoreStore({ db, auth, FieldValue, privilegedEmails, now = Da
       Node: str(course.Node, 120),
       Contents: str(course.Contents, 300),
       notifyEnabled,
+      alertsExpireAt: notifyEnabled ? expireAt : (existing?.alertsExpireAt ?? null),
       ...(existing ? {} : { addedAt: FieldValue.serverTimestamp() }),
     };
     await watchedCol(uid).doc(course.CourseNo).set(doc, { merge: true });
@@ -370,13 +384,15 @@ function createFirestoreStore({ db, auth, FieldValue, privilegedEmails, now = Da
    * @param {string} uid
    * @param {string} courseNo
    * @param {boolean} enabled
+   * @param {number | null} expireAt - New expiry when enabling (restarts the countdown).
    * @returns {Promise<WatchedCourse | null>}
    */
-  async function setNotify(uid, courseNo, enabled) {
+  async function setNotify(uid, courseNo, enabled, expireAt) {
     const existing = getWatched(uid, courseNo);
     if (!existing) return null;
-    await watchedCol(uid).doc(courseNo).update({ notifyEnabled: enabled });
-    const entry = { ...existing, notifyEnabled: enabled };
+    const patch = enabled ? { notifyEnabled: true, alertsExpireAt: expireAt } : { notifyEnabled: false };
+    await watchedCol(uid).doc(courseNo).update(patch);
+    const entry = { ...existing, ...patch };
     /** @type {Map<string, WatchedCourse>} */ (watched.get(uid)).set(courseNo, entry);
     return entry;
   }
@@ -392,6 +408,34 @@ function createFirestoreStore({ db, auth, FieldValue, privilegedEmails, now = Da
     watched.get(uid)?.delete(courseNo);
     events.emit("unwatched", uid, courseNo);
     return true;
+  }
+
+  /**
+   * Switches off alerts whose 30-day window has passed (or that predate
+   * expiry), persisting notifyEnabled=false so every device shows it.
+   *
+   * @returns {Promise<number>} How many were switched off.
+   */
+  async function expireAlerts() {
+    const t = now();
+    /** @type {Array<[string, WatchedCourse]>} */
+    const due = [];
+    for (const [uid, courses] of watched) {
+      for (const w of courses.values()) {
+        if (w.notifyEnabled && !alertsActive(w, t)) due.push([uid, w]);
+      }
+    }
+    for (let i = 0; i < due.length; i += 400) {
+      const batch = db.batch();
+      for (const [uid, w] of due.slice(i, i + 400)) {
+        batch.update(watchedCol(uid).doc(w.CourseNo), { notifyEnabled: false, alertsExpireAt: w.alertsExpireAt ?? t });
+      }
+      await batch.commit();
+      for (const [uid, w] of due.slice(i, i + 400)) {
+        watched.get(uid)?.set(w.CourseNo, { ...w, notifyEnabled: false, alertsExpireAt: w.alertsExpireAt ?? t });
+      }
+    }
+    return due.length;
   }
 
   /**
@@ -433,8 +477,9 @@ function createFirestoreStore({ db, auth, FieldValue, privilegedEmails, now = Da
     putWatched,
     setNotify,
     removeWatched,
+    expireAlerts,
     deleteUser,
   };
 }
 
-module.exports = { createFirestoreStore, normalizeWatched, normalizeUser };
+module.exports = { createFirestoreStore, normalizeWatched, normalizeUser, alertsActive };

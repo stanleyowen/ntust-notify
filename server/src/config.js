@@ -73,6 +73,10 @@ function loadConfig(env = process.env) {
     trustProxy: toInt(env.TRUST_PROXY, 1, { min: 0, max: 10 }),
     pollConcurrency: toInt(env.POLL_FETCH_CONCURRENCY, 8, { min: 1, max: 32 }),
     maxWatchedPerUser: toInt(env.MAX_WATCHED_PER_USER, 30, { min: 1, max: 200 }),
+    // Alerts switch themselves off this many days after being turned on, so
+    // forgotten trackers stop costing NTUST requests. Turning alerts on again
+    // (or "extend") restarts the countdown.
+    alertDurationDays: toInt(env.ALERT_DURATION_DAYS, 30, { min: 1, max: 365 }),
     firebaseServiceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON || null,
     smtp: smtpReady
       ? {

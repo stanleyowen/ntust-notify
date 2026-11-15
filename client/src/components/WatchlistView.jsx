@@ -17,11 +17,11 @@ const AUTO_REFRESH_MS = 60_000;
  *   onRemove: (courseNo: string) => void,
  * }} props
  */
-const WatchCard = memo(function WatchCard({ course, pending, hasChannel, onToggle, onRemove }) {
+const WatchCard = memo(function WatchCard({ course, pending, hasChannel, durationDays, onToggle, onRemove }) {
   const { t } = useTranslation();
   const e = enrollment(course);
   const name = course.CourseName || course.CourseNo;
-  const on = course.notifyEnabled;
+  const { on, daysLeft, ended, endedAt } = course.alerts;
   const switchId = `alerts-${course.CourseNo}`;
   const canRegister = e.unlimited || (e.known && !e.full);
 
@@ -69,6 +69,23 @@ const WatchCard = memo(function WatchCard({ course, pending, hasChannel, onToggl
         )}
       </ul>
 
+      {on ? (
+        <p className={`watch-card-timer ${daysLeft <= 7 ? "is-soon" : ""}`}>
+          <Icon name="bell" size={14} />
+          <span>{t("watchlist.alertsEndIn", { count: daysLeft })}</span>
+          {daysLeft <= 7 && (
+            <button type="button" className="link-btn" disabled={pending} onClick={() => onToggle(course.CourseNo, true, { extend: true })}>
+              {t("watchlist.extend", { days: durationDays })}
+            </button>
+          )}
+        </p>
+      ) : ended ? (
+        <p className="watch-card-timer">
+          <Icon name="bellOff" size={14} />
+          <span>{t("watchlist.alertsEnded", { date: new Date(endedAt).toLocaleDateString(), days: durationDays })}</span>
+        </p>
+      ) : null}
+
       {on && !hasChannel && (
         <p className="watch-card-warn">
           <Icon name="alert" size={14} />
@@ -89,7 +106,7 @@ const WatchCard = memo(function WatchCard({ course, pending, hasChannel, onToggl
             <Icon name="external" size={14} />
           </a>
         ) : (
-          <span className="watch-card-hint">{on ? t("watchlist.watchingHint") : t("watchlist.pausedHint")}</span>
+          <span className="watch-card-hint">{on ? t("watchlist.watchingHint") : ended ? "" : t("watchlist.pausedHint")}</span>
         )}
         <button
           type="button"
@@ -168,7 +185,7 @@ export function WatchlistView() {
     for (const c of courses) {
       const e = enrollment(c);
       if (e.unlimited || (e.known && !e.full)) open++;
-      if (c.notifyEnabled) alerts++;
+      if (c.alerts.on) alerts++;
     }
     return { open, alerts };
   }, [courses]);
@@ -228,6 +245,7 @@ export function WatchlistView() {
             course={c}
             pending={pending.has(c.CourseNo)}
             hasChannel={hasChannel}
+            durationDays={limits.alertDurationDays}
             onToggle={setAlerts}
             onRemove={unwatch}
           />
