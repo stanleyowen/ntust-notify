@@ -65,6 +65,10 @@ function loadConfig(env = process.env) {
 
   return {
     port: toInt(env.PORT, 3000, { min: 1, max: 65535 }),
+    // Interface to listen on. Loopback by default so the API is only reachable
+    // through the local reverse proxy / tunnel, never directly from the LAN
+    // (where X-Forwarded-For could be forged). Docker sets 0.0.0.0.
+    host: (env.HOST ?? "").trim() || "127.0.0.1",
     isProduction: env.NODE_ENV === "production",
     allowedOrigins: origins.length ? origins : DEFAULT_ORIGINS,
     // Lower-cased for case-insensitive comparison against verified emails.

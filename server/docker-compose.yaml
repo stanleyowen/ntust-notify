@@ -15,10 +15,11 @@ services:
       # Mounted read-only, outside the app directory.
       - ./service-account.json:/run/secrets/service-account.json:ro
     ports:
-      # If a reverse proxy runs on this same host, set BIND_ADDR=127.0.0.1 in
-      # .env so the API is reachable only through the proxy (and
-      # X-Forwarded-For can't be spoofed by direct clients).
-      - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-3000}:3000"
+      # Loopback by default: the API is reachable only through a reverse
+      # proxy / tunnel on this host, so direct clients can't spoof
+      # X-Forwarded-For. Set BIND_ADDR=0.0.0.0 only if clients must connect
+      # directly (and then set TRUST_PROXY=0).
+      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     restart: unless-stopped
     read_only: true
     tmpfs:

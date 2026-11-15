@@ -72,11 +72,15 @@ const app = createApp({
   store,
   poller,
   notifier,
-  verifyIdToken: firebase ? (token) => firebase.auth.verifyIdToken(token) : null,
+  verifyIdToken: firebase
+    ? (token, { checkRevoked = false } = {}) => firebase.auth.verifyIdToken(token, checkRevoked)
+    : null,
 });
 
-const server = app.listen(config.port, () => {
-  console.log(`[SERVER] Listening on :${config.port} (${config.isProduction ? "production" : "development"})`);
+const server = app.listen(config.port, config.host, () => {
+  console.log(
+    `[SERVER] Listening on ${config.host}:${config.port} (${config.isProduction ? "production" : "development"})`,
+  );
 });
 // Slowloris protection and sane upper bounds on idle sockets.
 server.headersTimeout = 20_000;

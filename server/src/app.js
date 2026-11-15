@@ -49,10 +49,14 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
   app.set("trust proxy", config.trustProxy);
   app.set("etag", false);
 
-  // JSON-only API: lock the CSP all the way down.
+  // JSON-only API: lock the CSP all the way down. useDefaults:false so
+  // helmet's HTML-oriented defaults (style-src 'unsafe-inline', …) aren't merged in.
   app.use(
     helmet({
-      contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] },
+      },
       crossOriginResourcePolicy: { policy: "same-site" },
     }),
   );
@@ -91,29 +95,60 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
   const testLimiter = perUser(10 * 60_000, 5);
 
   // ── Auth ─────────────────────────────────────────────────────────────────
-  async function requireAuth(req, _res, next) {
-    if (!verifyIdToken || !store) throw new HttpError(503, "auth_unavailable", "Authentication is not configured.");
-    const match = BEARER_RE.exec(req.get("authorization") ?? "");
-    if (!match) throw new HttpError(401, "unauthorized", "Sign in required.");
-    let decoded;
-    try {
-      decoded = await verifyIdToken(match[1]);
-    } catch {
-      throw new HttpError(401, "invalid_token", "Your session expired — please sign in again.");
-    }
-    if (!decoded.email || decoded.email_verified !== true) {
-      throw new HttpError(403, "email_unverified", "A verified Google account is required.");
-    }
-    req.user = {
-      uid: decoded.uid,
-      email: String(decoded.email).toLowerCase(),
-      emailVerified: true,
-      name: typeof decoded.name === "string" ? decoded.name : "",
-      picture: typeof decoded.picture === "string" ? decoded.picture : "",
-    };
-    await store.whenReady();
-    next();
+
+  // ID tokens stay cryptographically valid for up to an hour after the account
+  // is deleted. Remember recent deletions so a leftover token (e.g. on another
+  // device) can't keep using the API or re-create the user document.
+  const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
+  /** @type {Map<string, number>} uid → deletedAt */
+  const deletedUids = new Map();
+  function rememberDeleted(uid) {
+    const t = Date.now();
+    for (const [u, at] of deletedUids) if (t - at > TOKEN_LIFETIME_MS) deletedUids.delete(u);
+    deletedUids.set(uid, t);
   }
+
+  /**
+   * Builds the auth middleware. `checkRevoked` additionally asks Firebase Auth
+   * whether the token was revoked or the account disabled/deleted. It costs a
+   * network round-trip, so it's only used on sign-in and account deletion.
+   *
+   * @param {{ checkRevoked?: boolean }} [opts]
+   */
+  function authenticate({ checkRevoked = false } = {}) {
+    return async function requireAuth(req, _res, next) {
+      if (!verifyIdToken || !store) throw new HttpError(503, "auth_unavailable", "Authentication is not configured.");
+      const match = BEARER_RE.exec(req.get("authorization") ?? "");
+      if (!match) throw new HttpError(401, "unauthorized", "Sign in required.");
+      let decoded;
+      try {
+        decoded = await verifyIdToken(match[1], { checkRevoked });
+      } catch (err) {
+        // Firebase Auth itself unreachable: not the user's fault, don't force a re-login.
+        if (err?.code === "auth/internal-error") {
+          throw new HttpError(503, "auth_unavailable", "Sign-in service is temporarily unavailable.");
+        }
+        throw new HttpError(401, "invalid_token", "Your session expired — please sign in again.");
+      }
+      if (deletedUids.has(decoded.uid)) {
+        throw new HttpError(401, "invalid_token", "Your session expired — please sign in again.");
+      }
+      if (!decoded.email || decoded.email_verified !== true) {
+        throw new HttpError(403, "email_unverified", "A verified Google account is required.");
+      }
+      req.user = {
+        uid: decoded.uid,
+        email: String(decoded.email).toLowerCase(),
+        emailVerified: true,
+        name: typeof decoded.name === "string" ? decoded.name : "",
+        picture: typeof decoded.picture === "string" ? decoded.picture : "",
+      };
+      await store.whenReady();
+      next();
+    };
+  }
+  const requireAuth = authenticate();
+  const requireFreshAuth = authenticate({ checkRevoked: true });
 
   /** When alerts turned on now should switch themselves off. */
   const alertExpiry = () => Date.now() + config.alertDurationDays * 24 * 60 * 60 * 1000;
@@ -169,7 +204,7 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
     }
   });
 
-  api.post("/session", requireAuth, writeLimiter, async (req, res) => {
+  api.post("/session", requireFreshAuth, writeLimiter, async (req, res) => {
     await store.upsertSession(req.user);
     res.json(accountPayload(req));
   });
@@ -185,8 +220,16 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
     res.json({ prefs: parsed.value });
   });
 
-  api.delete("/me", requireAuth, writeLimiter, async (req, res) => {
-    await store.deleteUser(req.user.uid);
+  api.delete("/me", requireFreshAuth, writeLimiter, async (req, res) => {
+    // Tombstone first so concurrent requests can't re-create data mid-delete;
+    // lift it again if the delete fails, so the user isn't locked out.
+    rememberDeleted(req.user.uid);
+    try {
+      await store.deleteUser(req.user.uid);
+    } catch (err) {
+      deletedUids.delete(req.user.uid);
+      throw err;
+    }
     logger.log(`[ACCOUNT] Deleted account ${req.user.uid}`);
     res.status(204).end();
   });
@@ -299,7 +342,8 @@ function createApp({ config, ntust, store, poller, notifier, verifyIdToken, logg
         notifyEnabled: w.notifyEnabled,
         alertsExpireAt: w.alertsExpireAt,
         state: poller?.stateFor(uid, w.CourseNo) ?? null,
-        sharedIntervalMs: poller && w.Semester ? poller.sharedInterval(w.Semester, w.CourseNo) : null,
+        // No shared/global poll interval here: it would reveal whether other
+        // (possibly privileged) users watch the same course.
         cache: info.cached
           ? {
               ageMs: t - info.cached.fetchedAt,

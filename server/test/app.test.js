@@ -12,6 +12,7 @@ const TOKENS = {
   "token-alice-0000000000000": { uid: "alice", email: "Alice@Example.com", email_verified: true, name: "Alice" },
   "token-boss-00000000000000": { uid: "boss", email: "boss@example.com", email_verified: true, name: "Boss" },
   "token-unverified-00000000": { uid: "eve", email: "eve@example.com", email_verified: false },
+  "token-revoked-00000000000": { uid: "mallory", email: "mallory@example.com", email_verified: true, revoked: true },
 };
 
 /** Boots an app on an ephemeral port and returns a tiny fetch helper. */
@@ -23,6 +24,8 @@ async function boot({ env = {} } = {}) {
   ntust.set("1151", { CourseNo: "CS3003301", CourseName: "離散數學", CourseTeacher: "項", Restrict1: "80", ChooseStudent: 80, Node: "W9" });
   ntust.set("1151", { CourseNo: "CS3004301", CourseName: "OS", Restrict1: "60", ChooseStudent: 10 });
   ntust.set("1151", { CourseNo: "CS3005301", CourseName: "DB", Restrict1: "60", ChooseStudent: 10 });
+  /** @type {Array<{ token: string, checkRevoked: boolean }>} */
+  const verifyCalls = [];
   const app = createApp({
     config,
     ntust,
@@ -30,8 +33,11 @@ async function boot({ env = {} } = {}) {
     poller: null,
     notifier,
     logger: silentLogger,
-    verifyIdToken: async (t) => {
+    verifyIdToken: async (t, { checkRevoked = false } = {}) => {
+      verifyCalls.push({ token: t, checkRevoked });
+      if (t === "token-authdown-0000000000") throw Object.assign(new Error("down"), { code: "auth/internal-error" });
       if (!TOKENS[t]) throw new Error("bad token");
+      if (checkRevoked && TOKENS[t].revoked) throw Object.assign(new Error("revoked"), { code: "auth/id-token-revoked" });
       return TOKENS[t];
     },
   });
@@ -61,7 +67,7 @@ async function boot({ env = {} } = {}) {
     }
     return { status: res.status, headers: res.headers, json, text };
   };
-  return { call, store, ntust, notifier, close: () => new Promise((r) => server.close(r)) };
+  return { call, store, ntust, notifier, verifyCalls, close: () => new Promise((r) => server.close(r)) };
 }
 
 const ALICE = "token-alice-0000000000000";
@@ -74,7 +80,10 @@ test("health + security headers", async (t) => {
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("x-powered-by"), null);
   assert.equal(r.headers.get("x-content-type-options"), "nosniff");
-  assert.match(r.headers.get("content-security-policy"), /default-src 'none'/);
+  const csp = r.headers.get("content-security-policy");
+  assert.match(csp, /default-src 'none'/);
+  // helmet's HTML defaults must not be merged into the API policy.
+  assert.doesNotMatch(csp, /unsafe-inline|script-src|style-src/);
 });
 
 test("CORS: allowed origin reflected, unknown origin gets no CORS headers (not a 500)", async (t) => {
@@ -227,6 +236,50 @@ test("delete account wipes the user's data", async (t) => {
   assert.equal((await call("/api/me", { method: "DELETE", token: ALICE })).status, 204);
   assert.equal(store.getUser("alice"), null);
   assert.equal(store.listWatched("alice").length, 0);
+  // The still-valid ID token can't use the API or re-create the account.
+  assert.equal((await call("/api/session", { method: "POST", token: ALICE })).json.code, "invalid_token");
+  assert.equal((await call("/api/me", { token: ALICE })).status, 401);
+  assert.equal(store.getUser("alice"), null);
+});
+
+test("sign-in and account deletion check token revocation; other routes don't", async (t) => {
+  const { call, verifyCalls, close } = await boot();
+  t.after(close);
+  await call("/api/session", { method: "POST", token: ALICE });
+  await call("/api/me", { token: ALICE });
+  assert.deepEqual(
+    verifyCalls.map((c) => c.checkRevoked),
+    [true, false],
+  );
+  const REVOKED = "token-revoked-00000000000";
+  const r = await call("/api/session", { method: "POST", token: REVOKED });
+  assert.equal(r.status, 401);
+  assert.equal(r.json.code, "invalid_token");
+  assert.equal((await call("/api/me", { method: "DELETE", token: REVOKED })).status, 401);
+});
+
+test("Firebase Auth outage is a 503, not a forced sign-out", async (t) => {
+  const { call, close } = await boot();
+  t.after(close);
+  const r = await call("/api/me", { token: "token-authdown-0000000000" });
+  assert.equal(r.status, 503);
+  assert.equal(r.json.code, "auth_unavailable");
+});
+
+test("notify status doesn't reveal other users' polling of the same course", async (t) => {
+  const { call, close } = await boot();
+  t.after(close);
+  await call("/api/session", { method: "POST", token: ALICE });
+  await call("/api/watchlist/CS3003301", { method: "PUT", token: ALICE, body: { semester: "1151" } });
+  const r = await call("/api/notify/status", { token: ALICE });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.courses.length, 1);
+  assert.equal("sharedIntervalMs" in r.json.courses[0], false);
+});
+
+test("config: listens on loopback unless HOST is set", () => {
+  assert.equal(loadConfig({}).host, "127.0.0.1");
+  assert.equal(loadConfig({ HOST: " 0.0.0.0 " }).host, "0.0.0.0");
 });
 
 test("alerts get a 30-day expiry; re-enabling renews it", async (t) => {
