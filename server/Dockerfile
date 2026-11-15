@@ -8,7 +8,10 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # ── Runtime ─────────────────────────────────────────────────────────────────
 FROM node:24-alpine
+# HOST=0.0.0.0: inside the container the port mapping (not the app) decides
+# exposure — see BIND_ADDR in docker-compose.yaml.
 ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
     PORT=3000
 WORKDIR /app
 

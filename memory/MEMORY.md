@@ -1,1 +1,1 @@
-- [Package manager](package-manager.md) — use yarn in client/, not npm (both lockfiles are tracked)
+- [Package manager](package-manager.md) — use yarn in client/, not npm (only yarn.lock is tracked)

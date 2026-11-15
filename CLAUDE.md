@@ -15,7 +15,7 @@ node --test test/poller.test.js                   # one file
 node --test --test-name-pattern="watchlist" test/app.test.js   # one test
 npm run dev                                       # node --watch index.js
 
-# client (React 18 + Vite 5, ESM)
+# client (React 19 + Vite 8/Rolldown, ESM; Node ≥ 24.12 via client/.nvmrc — firebase 13 requires it)
 cd client
 yarn
 yarn dev                                          # http://localhost:3001
@@ -83,6 +83,6 @@ API (server/) ──Admin SDK──► Firestore   (firestore.rules: deny ALL cl
   ```bash
   cd ~/server/ntust-notify && git pull && cd server && npm ci --omit=dev && pm2 restart ntust-notify
   ```
-  `TRUST_PROXY=1` matches the single cloudflared hop. The server's `.env` and `service-account.json` are git-ignored and live only on the box.
+  `TRUST_PROXY=1` matches the single cloudflared hop. The server binds `HOST` (default `127.0.0.1`), so cloudflared on the same box is the only way in; `ufw` also blocks the port. The server's `.env` and `service-account.json` are git-ignored and live only on the box.
 - **Docker:** `server/Dockerfile` and `docker-compose.yaml` are an alternative backend deploy. Use explicit `--chmod` on `COPY`, because host files may be mode 600.
 - **Deploy order** for API changes the client depends on: backend first, then frontend. Firestore rules are deployed separately (`firestore.rules`, via the Firebase Console or `npx firebase-tools deploy --only firestore:rules`).

@@ -101,10 +101,12 @@ export default defineConfig(({ mode }) => {
       target: "es2022",
       sourcemap: false,
       modulePreload: { polyfill: false },
-      rollupOptions: {
+      rolldownOptions: {
         output: {
           // Firebase changes rarely; a separate chunk stays cached across deploys.
-          manualChunks: { firebase: ["firebase/app", "firebase/auth"] },
+          codeSplitting: {
+            groups: [{ name: "firebase", test: /[\\/]node_modules[\\/](@firebase|firebase)[\\/]/ }],
+          },
         },
       },
     },
